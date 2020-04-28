@@ -1,2 +1,2 @@
-from Jomini.Lanchester import LinearLaw, SquareLaw
+from jomini.Lanchester import Battle, LinearLaw, SquareLaw
 # TODO add models for guerrilla and siege warfare
