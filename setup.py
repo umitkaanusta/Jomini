@@ -3,7 +3,7 @@ from distutils.core import setup
 setup(
   name="Jomini",
   packages=["jomini"],
-  version="0.1.0",
+  version="0.1.0-bugfix",
   license="MIT",
   description="Historical battle simulation package for Python",
   author="Ümit Kaan Usta",
