@@ -113,12 +113,11 @@ class LinearLaw(Lanchester):
 
     def get_casualty_rates(self):
         """ Returns a tuple representing casualty rates for unit time """
-        # Linear Law assumes beta = rho
         # Actually Lanchester himself did not even write a formula for the linear law
-        density_red = self.engagement_width / self.battle.red ** 2
-        density_blue = self.engagement_width / self.battle.blue ** 2
-        rate_red = density_red * self.battle.red * self.battle.blue
-        rate_blue = density_blue * self.battle.red * self.battle.blue
+        density_red = (self.engagement_width / self.battle.red ** 2)
+        density_blue = (self.engagement_width / self.battle.blue ** 2)
+        rate_red = density_red * self.battle.red * self.battle.blue * self.battle.beta * 100
+        rate_blue = density_blue * self.battle.red * self.battle.blue * self.battle.rho * 100
         return int(rate_red), int(rate_blue)
 
     def simulate_battle(self, time=None):
