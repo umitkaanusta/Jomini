@@ -9,7 +9,7 @@ setup(
   author="Ümit Kaan Usta",
   author_email="u.kaanusta@gmail.com",
   url="https://github.com/umitkaanusta/Jomini",
-  download_url="https://github.com/umitkaanusta/Jomini/archive/v0.1.0-bugfix.tar.gz",
+  download_url="https://github.com/umitkaanusta/Jomini/archive/v0.1.1.tar.gz",
   keywords=["military", "battle", "combat", "history", "simulation", "war", "historical", "attrition", "model"],
   install_requires=[],
   classifiers=[
