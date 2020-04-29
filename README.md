@@ -1,6 +1,6 @@
 # Jomini v0.1.2
 ![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)
-![PyPI status](https://img.shields.io/pypi/status/ansicolortags.svg)
+![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
 
 ![ForTheBadge built-with-love](http://ForTheBadge.com/images/badges/built-with-love.svg)
 
