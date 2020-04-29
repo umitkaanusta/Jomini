@@ -22,7 +22,19 @@ This package uses the combat models developed by Frederick William Lanchester, a
 - The Linear Law is based on force concentration
 - Good for modelling melee battles and unaimed fire (artillery, arquebus, handcannon etc.) 
 
-<script src="https://gist.github.com/umitkaanusta/4c5b9b53fc6db95713a05c0e3e52766b.js"></script>
+```python
+from jomini.Lanchester import Battle, LinearLaw
+
+# Re-creating the Battle of Cerignola (AD 1503)
+# In the actual battle, Spanish(red) lost 500 men while the French(blue) lost 4000 men
+# Parameters rho, beta, engagement_width and time are manually fine_tuned
+b = Battle(red=6_300, blue=9_000, rho=0.0800, beta=0.0100)
+L = LinearLaw(b, engagement_width=100)
+print(L.get_casualty_rates()) # Returns casualty rates 
+print(L.get_casualties(time=7))
+print(L.get_remaining(time=7))
+print(L.simulate_battle(time=7))
+```
 
 ![Linear Law](https://i.imgur.com/yjAUK57.png)
 
@@ -30,7 +42,22 @@ This package uses the combat models developed by Frederick William Lanchester, a
 - Given equal power coefficients, the fighting power is proportional to the square of army size.
 - Good for modelling aimed fire (e.g Napoleonic line-battles)
 
-<script src="https://gist.github.com/umitkaanusta/b35cda3d2b9572c827b8ee6f7f959e6c.js"></script>
+```python
+from jomini.Lanchester import SquareLaw
+
+# Re-creating the Battle of Gettysburg (1863)
+# --Actual battle--
+# Union(red) losses: 23.000
+# Confederate(blue) losses: 28.000
+b = Battle(red=104_000, blue=75_000, rho=0.0180, beta=0.0100)  # No need to specify rho and beta
+S = SquareLaw(b)
+print(S.get_casualty_rates())
+print(S.get_casualties(time=21))
+print(S.get_remaining(time=21))
+print(S.simulate_battle(time=21))
+# What if the battle lasted until one side is annihilated?
+print("\n"+ S.simulate_battle()) # time is None by default
+```
 
 ![Square Law](https://i.imgur.com/oRgkTaq.png)
 
