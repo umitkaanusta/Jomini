@@ -49,7 +49,7 @@ from jomini.Lanchester import SquareLaw
 # --Actual battle--
 # Union(red) losses: 23.000
 # Confederate(blue) losses: 28.000
-b = Battle(red=104_000, blue=75_000, rho=0.0180, beta=0.0100)  # No need to specify rho and beta
+b = Battle(red=104_000, blue=75_000, rho=0.0180, beta=0.0100)
 S = SquareLaw(b)
 print(S.get_casualty_rates())
 print(S.get_casualties(time=21))
