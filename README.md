@@ -1,4 +1,4 @@
-# Jomini v0.1.2
+# Jomini v0.1.3
 ![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
 
@@ -38,26 +38,28 @@ print(L.simulate_battle(time=7))
 
 ![Linear Law](https://i.imgur.com/yjAUK57.png)
 
-## Code Sample: Lanchester's Square Law
-- Given equal power coefficients, the fighting power is proportional to the square of army size.
-- Good for modelling aimed fire (e.g Napoleonic line-battles)
+## Code Sample: Visiting models used in Jomini
+- __Square Law:__ Given equal power coefficients, the fighting power is proportional to the square of army size.
+    - Good for modelling aimed fire (e.g Napoleonic line-battles)
+- __Logarithmic Law:__ Basically square law at a larger scale, used by Weiss to model the American Civil War 
+    - Good for modelling tank combat as well
+
 
 ```python
-from jomini.Lanchester import SquareLaw
+from jomini.Lanchester import Battle, LinearLaw, SquareLaw, LogarithmicLaw, GeneralLaw
 
-# Re-creating the Battle of Gettysburg (1863)
-# --Actual battle--
-# Union(red) losses: 23.000
-# Confederate(blue) losses: 28.000
-b = Battle(red=104_000, blue=75_000, rho=0.0180, beta=0.0100)
-S = SquareLaw(b)
-print(S.get_casualty_rates())
-print(S.get_casualties(time=21))
-print(S.get_remaining(time=21))
-print(S.simulate_battle(time=21))
-# What if the battle lasted until one side is annihilated?
-print("\n"+ S.simulate_battle()) # time is None by default
+# Simulating a fictitious battle with each of the laws
+b = Battle(red=20_000, blue=30_000, rho=0.0150, beta=0.0120)
+Linear = LinearLaw(b, engagement_width=500)
+Square = SquareLaw(b)
+Log = LogarithmicLaw(b)
+Generalized = GeneralLaw(b, engagement_width=500, p=0.450, q=0.600)
+
+# If time is not specified, the battle goes on until one side is annihilated.
+print(Linear.simulate_battle() + "\n")
+print(Square.simulate_battle() + "\n")
+print(Log.simulate_battle() + "\n")
+print(Generalized.simulate_battle())
 ```
-
-![Square Law](https://i.imgur.com/oRgkTaq.png)
-
+![Model-1](https://i.imgur.com/Uoz9bz4.png)
+![Model-2](https://i.imgur.com/9XlE6aA.png)
