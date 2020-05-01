@@ -1,4 +1,4 @@
-# Jomini v0.1.3
+# Jomini v0.1.4
 ![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
 
