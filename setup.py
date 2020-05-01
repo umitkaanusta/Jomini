@@ -3,13 +3,13 @@ from distutils.core import setup
 setup(
   name='Jomini',
   packages=['jomini'],
-  version='0.1.3',
+  version='0.1.4',
   license='MIT',
   description='Historical battle simulation package for Python',
   author='Ümit Kaan Usta',
   author_email='u.kaanusta@gmail.com',
   url='https://github.com/umitkaanusta/Jomini',
-  download_url='https://github.com/umitkaanusta/Jomini/archive/v0.1.3.tar.gz',
+  download_url='https://github.com/umitkaanusta/Jomini/archive/v0.1.4.tar.gz',
   keywords=['military', 'battle', 'combat', 'history', 'simulation', 'war', 'historical', 'attrition', 'model'],
   classifiers=[
     'Development Status :: 3 - Alpha',
