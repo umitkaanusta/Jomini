@@ -24,25 +24,13 @@ class Battle:
         self.rho = rho
         self.beta = beta
 
-    @property
-    def total(self):
-        return self.red + self.blue
-
-    @property
-    def force_red(self):
-        return self.red * self.rho
-
-    @property
-    def force_blue(self):
-        return self.blue * self.beta
-
     def __repr__(self):
         return f"Battle({self.red}, {self.rho}, {self.blue}, {self.beta})"
 
     def __str__(self):
         return f"Battle\n" \
-               f"Red side: {self.red} Soldiers | Rho: {self.rho} | Total force: {self.force_red}\n" \
-               f"Blue side: {self.blue} Soldiers | Beta: {self.beta} | Total force: {self.force_blue}"
+               f"Red side: {self.red} Soldiers | Rho: {self.rho}\n" \
+               f"Blue side: {self.blue} Soldiers | Beta: {self.beta}"
 
 
 class Lanchester:
@@ -97,7 +85,7 @@ class LinearLaw(Lanchester):
         """
         Implementing Lanchester's Linear Law
         :param battle: Battle object
-        :param int engagement_width: How many units from each army engage at unit time?
+        :param int engagement_width: Denotes the width of the front-line
         """
         if not isinstance(battle, Battle):
             raise TypeError("battle should be an object of the Battle class")
@@ -111,17 +99,30 @@ class LinearLaw(Lanchester):
         self.battle = battle
         self.engagement_width = engagement_width
 
-    def get_casualty_rates(self):
-        """ Returns a tuple representing casualty rates for unit time """
-        # Actually Lanchester himself did not even write a formula for the linear law
+    def get_density(self):
         density_red = (self.engagement_width / self.battle.red ** 2)
         density_blue = (self.engagement_width / self.battle.blue ** 2)
+        return density_red, density_blue
+
+    def get_casualty_rates(self):
+        """ Returns a tuple representing casualty rates for unit time """
+        density_red, density_blue = self.get_density()
         rate_red = density_red * self.battle.red * self.battle.blue * self.battle.beta * 100
         rate_blue = density_blue * self.battle.red * self.battle.blue * self.battle.rho * 100
         return int(rate_red), int(rate_blue)
 
     def simulate_battle(self, time=None):
-        return self._simulate_battle(time=time, which_model="LINEAR LAW")
+        time = self._check_time(time)
+        density_red, density_blue = self.get_density()
+        casualties_red, casualties_blue = self.get_casualties(time)
+        remaining_red, remaining_blue = self.get_remaining(time)
+        return_str = f"----- LINEAR LAW BATTLE RESULTS -----\n" + str(self.battle) + "\n" \
+                     + f"Engagement width: {self.engagement_width} | " \
+                     + f"Red density: {density_red} | Blue density: {density_blue}\n" \
+                     + f"The battle lasted {time} time units.\n" \
+                     + f"Red casualties: {casualties_red} | " + f"Blue casualties: {casualties_blue}\n" \
+                     + f"Red remaining: {remaining_red} | " + f"Blue Remaining: {remaining_blue}\n" + "-" * 60
+        return return_str
 
 
 class SquareLaw(Lanchester):
@@ -137,9 +138,91 @@ class SquareLaw(Lanchester):
 
     def get_casualty_rates(self):
         """ Returns a tuple representing casualty rates for unit time """
+        rate_red = self.battle.blue * self.battle.beta
+        rate_blue = self.battle.red * self.battle.rho
+        return int(rate_red), int(rate_blue)
+
+    def simulate_battle(self, time=None):
+        return self._simulate_battle(time=time, which_model="SQUARE LAW")
+
+
+class LogarithmicLaw(Lanchester):
+    def __init__(self, battle):
+        """
+        Implementing the Logarithmic Law
+        :param battle: Battle object
+        """
+        if not isinstance(battle, Battle):
+            raise TypeError("battle should be an object of the Battle class")
+
+        self.battle = battle
+
+    def get_casualty_rates(self):
+        """ Returns a tuple representing casualty rates for unit time """
         rate_red = self.battle.red * self.battle.beta
         rate_blue = self.battle.blue * self.battle.rho
         return int(rate_red), int(rate_blue)
 
     def simulate_battle(self, time=None):
-        return self._simulate_battle(time=time, which_model="SQUARE LAW")
+        return self._simulate_battle(time=time, which_model="LOGARITHMIC LAW")
+
+
+class GeneralLaw(Lanchester):
+    def __init__(self, battle, engagement_width, p, q):
+        """
+        Implementing the General Law by Bracken (Generalization of Linear, Square and Logarithmic laws)
+        p = q = 1 leads to the Linear Law (The actual Linear Law, not our version)
+        p = 0 AND q = 1 leads to the Logarithmic Law
+        p = 1 AND q = 0 leads to the Square Law
+
+        :param battle: Battle object
+        :param int engagement_width: Denotes the width of the front-line
+        :param float p: Exponent value which determines proximity to the said laws
+        :param float q: Another exponent value
+        """
+        if not isinstance(battle, Battle):
+            raise TypeError("battle should be an object of the Battle class")
+        if not isinstance(engagement_width, int):
+            raise TypeError("engagement_width must be an integer")
+        if engagement_width < 1:
+            raise ValueError("engagement_width can not be lesser than 1")
+        if engagement_width > min(battle.red, battle.blue):
+            raise ValueError("engagement_width can not be greater than the size of either side")
+        if not all(isinstance(el, (int, float)) for el in [p, q]):
+            raise TypeError("p and q must be int or float")
+        if not (0 <= p <= 1 and 0 <= q <= 1):
+            raise ValueError("p and q must be between 0 and 1 included.")
+
+        self.battle = battle
+        self.engagement_width = engagement_width
+        self.p = p
+        self.q = q
+
+    def get_density(self):
+        density_red = (self.engagement_width / self.battle.red ** 2)
+        density_blue = (self.engagement_width / self.battle.blue ** 2)
+        return density_red, density_blue
+
+    def get_casualty_rates(self):
+        """ Returns a tuple representing casualty rates for unit time """
+        SCALE_CONSTANT = 1_000_000
+        density_red, density_blue = self.get_density()
+        rate_red = density_red * (self.battle.red ** self.q) * (self.battle.blue ** self.p) \
+            * self.battle.beta * SCALE_CONSTANT
+        rate_blue = density_blue * (self.battle.red ** self.p) * (self.battle.blue ** self.q) \
+            * self.battle.rho * SCALE_CONSTANT
+        return int(rate_red), int(rate_blue)
+
+    def simulate_battle(self, time=None):
+        time = self._check_time(time)
+        density_red, density_blue = self.get_density()
+        casualties_red, casualties_blue = self.get_casualties(time)
+        remaining_red, remaining_blue = self.get_remaining(time)
+        return_str = f"----- GENERAL LAW BATTLE RESULTS -----\n" + str(self.battle) + "\n" \
+                     + f"Engagement width: {self.engagement_width} | " \
+                     + f"Red density: {density_red} | Blue density: {density_blue}\n" \
+                     + f"p value: {self.p} | q value: {self.q}\n" \
+                     + f"The battle lasted {time} time units.\n" \
+                     + f"Red casualties: {casualties_red} | " + f"Blue casualties: {casualties_blue}\n" \
+                     + f"Red remaining: {remaining_red} | " + f"Blue Remaining: {remaining_blue}\n" + "-" * 60
+        return return_str
