@@ -1,5 +1,5 @@
 # Jomini v0.1.4
-![Jomini](https://circleci.com/gh/umitkaanusta/jomini.svg?style=svg)
+![Jomini](https://circleci.com/gh/umitkaanusta/jomini.svg)
 ![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
 
