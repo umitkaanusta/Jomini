@@ -12,12 +12,12 @@ class Battle:
         """
         if not isinstance(red, int) or not isinstance(blue, int):
             raise TypeError("Number of soldiers must be integer")
-        if red < 0 or blue < 0:
-            raise ValueError("Number of soldiers can not be negative")
+        if red <= 0 or blue <= 0:
+            raise ValueError("Number of soldiers can not be zero or negative")
         if not isinstance(rho, (int, float)) or not isinstance(beta, (int, float)):
             raise TypeError("The power coefficient must be int or float")
-        if rho < 0 or beta < 0:
-            raise ValueError("Power coefficient values can not be negative")
+        if rho <= 0 or beta <= 0:
+            raise ValueError("Power coefficient values can not be zero or negative")
 
         self.red = red
         self.blue = blue
@@ -36,10 +36,9 @@ class Battle:
 class Lanchester:
     """Shows the general properties & methods of the Linear and Square Law"""
     def __init__(self):
-        raise RuntimeError("Lanchester class should not be instantiated")
+        raise RuntimeError("Lanchester class can not be instantiated")
 
     def _check_time(self, _time):
-        # You really don't need this method in your calculations
         if _time is None:  # If time is none, get the maximum time for the battle to end
             rate_red, rate_blue = self.get_casualty_rates()
             _time = int(ceil(self.battle.red / rate_red)) if rate_red > rate_blue \
@@ -109,6 +108,9 @@ class LinearLaw(Lanchester):
         density_red, density_blue = self.get_density()
         rate_red = density_red * self.battle.red * self.battle.blue * self.battle.beta * 100
         rate_blue = density_blue * self.battle.red * self.battle.blue * self.battle.rho * 100
+        if int(rate_red) >= self.battle.red and int(rate_blue) >= self.battle.blue:
+            raise ValueError("the casualty rates can not be greater than or equal to the sizes of both sides."
+                             "change your tuning parameters (engagement_width) and try again")
         return int(rate_red), int(rate_blue)
 
     def simulate_battle(self, time=None):
@@ -211,6 +213,9 @@ class GeneralLaw(Lanchester):
             * self.battle.beta * SCALE_CONSTANT
         rate_blue = density_blue * (self.battle.red ** self.p) * (self.battle.blue ** self.q) \
             * self.battle.rho * SCALE_CONSTANT
+        if int(rate_red) >= self.battle.red and int(rate_blue) >= self.battle.blue:
+            raise ValueError("the casualty rates can not be greater than or equal to the sizes of both sides."
+                             "change your tuning parameters (engagement_width, p, q) and try again")
         return int(rate_red), int(rate_blue)
 
     def simulate_battle(self, time=None):
