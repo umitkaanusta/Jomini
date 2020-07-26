@@ -75,7 +75,7 @@ class Lanchester:
         return_str = f"----- {which_model} BATTLE RESULTS -----\n" + str(self.battle) + "\n" \
             + f"The battle lasted {time} time units.\n" \
             + f"Red casualties: {casualties_red} | " + f"Blue casualties: {casualties_blue}\n" \
-            + f"Red remaining: {remaining_red} | " + f"Blue Remaining: {remaining_blue}\n" + "-" * 60
+            + f"Red remaining: {remaining_red} | " + f"Blue remaining: {remaining_blue}\n" + "-" * 60
         return return_str
 
 
@@ -123,7 +123,7 @@ class LinearLaw(Lanchester):
                      + f"Red density: {density_red} | Blue density: {density_blue}\n" \
                      + f"The battle lasted {time} time units.\n" \
                      + f"Red casualties: {casualties_red} | " + f"Blue casualties: {casualties_blue}\n" \
-                     + f"Red remaining: {remaining_red} | " + f"Blue Remaining: {remaining_blue}\n" + "-" * 60
+                     + f"Red remaining: {remaining_red} | " + f"Blue remaining: {remaining_blue}\n" + "-" * 60
         return return_str
 
 
@@ -229,5 +229,5 @@ class GeneralLaw(Lanchester):
                      + f"p value: {self.p} | q value: {self.q}\n" \
                      + f"The battle lasted {time} time units.\n" \
                      + f"Red casualties: {casualties_red} | " + f"Blue casualties: {casualties_blue}\n" \
-                     + f"Red remaining: {remaining_red} | " + f"Blue Remaining: {remaining_blue}\n" + "-" * 60
+                     + f"Red remaining: {remaining_red} | " + f"Blue remaining: {remaining_blue}\n" + "-" * 60
         return return_str
