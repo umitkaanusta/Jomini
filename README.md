@@ -20,7 +20,7 @@ pip install "jomini[pandas]"  # + pandas for result.to_pandas()
 from jomini import Battle, SquareLaw
 
 battle = Battle(red=20_000, blue=30_000)
-model = SquareLaw(rho=0.015, beta=0.012)   # rho: red's effectiveness, beta: blue's
+model = SquareLaw(rho=0.015, beta=0.012)  # rho: red's effectiveness, beta: blue's
 
 result = model.simulate(battle)
 print(result)
@@ -29,18 +29,18 @@ print(result)
 # Blue: 30,000 -> 20,000  (casualties 10,000)
 
 result.winner, result.duration, result.casualties
-result.at(10.0)        # exact (red, blue) strengths at t = 10
-result.t, result.red   # sampled trajectory as numpy arrays
-result.plot()          # needs jomini[plot]
+result.at(10.0)  # exact (red, blue) strengths at t = 10
+result.t, result.red  # sampled trajectory as numpy arrays
+result.plot()  # needs jomini[plot]
 ```
 
 Real armies rarely fight to the last man. A `breakpoint` makes a side break once it
 has lost that fraction of its starting strength:
 
 ```python
-model.simulate(battle, breakpoint=0.3)          # both sides break at 30% losses
-model.simulate(battle, breakpoint=(0.5, 0.2))   # (red, blue)
-model.simulate(battle, t_max=20)                # stop the clock at t = 20
+model.simulate(battle, breakpoint=0.3)  # both sides break at 30% losses
+model.simulate(battle, breakpoint=(0.5, 0.2))  # (red, blue)
+model.simulate(battle, t_max=20)  # stop the clock at t = 20
 ```
 
 ## The models
