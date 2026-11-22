@@ -1,66 +1,90 @@
-# Jomini v0.1.4
-[![Jomini](https://circleci.com/gh/circleci/circleci-docs.svg?style=svg)](https://circleci.com/gh/umitkaanusta/jomini)
-![GitHub license](https://img.shields.io/github/license/Naereen/StrapDown.js.svg)
-![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
+# Jomini
 
-![ForTheBadge built-with-love](http://ForTheBadge.com/images/badges/built-with-love.svg)
+[![CI](https://github.com/umitkaanusta/Jomini/actions/workflows/ci.yml/badge.svg)](https://github.com/umitkaanusta/Jomini/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/Jomini)](https://pypi.org/project/Jomini/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Jomini creates military simulations by using mathematical combat models. Designed to be helpful for game developers, students, history enthusiasts and -to some extent- scientists. You can mail me at u.kaanusta@gmail.com if you want to contribute.
+Jomini simulates battles with Lanchester-type combat models, the attrition equations
+Frederick W. Lanchester introduced in 1916 and that operations researchers have refined
+ever since. It's for game developers, students, history enthusiasts and researchers.
 
-__To download:__ https://pypi.org/project/Jomini
-
-Documentation will be available in the next update.
-
-# Lanchester Models 101
-This package uses the combat models developed by Frederick William Lanchester, a.k.a one of the founding fathers of Operations Research.
-
-- Lanchester Models are deterministic, which means the model will always yield the same result for the same input parameters.
-- Lanchester Models view battles as an attrition model, therefore manuevers and sudden changes during the battle can not be represented.
-- You might need to do some manual fine-tuning if you are not able to get quality parameters (rho, beta, engagement_width) from a data set.
-- ___Despite the downsides, even the primitive models developed by Lanchester himself works wonders with the right parameters.___ 
-
-## Code Sample: Lanchester's Linear Law
-- The Linear Law is based on force concentration
-- Good for modelling melee battles and unaimed fire (artillery, arquebus, handcannon etc.) 
-
-```python
-from jomini.Lanchester import Battle, LinearLaw
-
-# Re-creating the Battle of Cerignola (AD 1503)
-# In the actual battle, Spanish(red) lost 500 men while the French(blue) lost 4000 men
-# Parameters rho, beta, engagement_width and time are manually fine_tuned
-b = Battle(red=6_300, blue=9_000, rho=0.0800, beta=0.0100)
-L = LinearLaw(b, engagement_width=100)
-print(L.get_casualty_rates()) # Returns casualty rates 
-print(L.get_casualties(time=7))
-print(L.get_remaining(time=7))
-print(L.simulate_battle(time=7))
+```bash
+pip install jomini            # core (numpy + scipy)
+pip install "jomini[plot]"    # + matplotlib for result.plot()
+pip install "jomini[pandas]"  # + pandas for result.to_pandas()
 ```
 
-![Linear Law](https://i.imgur.com/yjAUK57.png)
-
-## Code Sample: Visiting models used in Jomini
-- __Square Law:__ Given equal power coefficients, the fighting power is proportional to the square of army size.
-    - Good for modelling aimed fire (e.g Napoleonic line-battles)
-- __Logarithmic Law:__ Basically square law at a larger scale, used by Weiss to model the American Civil War 
-    - Good for modelling tank combat as well
-
+## Quick start
 
 ```python
-from jomini.Lanchester import Battle, LinearLaw, SquareLaw, LogarithmicLaw, GeneralLaw
+from jomini import Battle, SquareLaw
 
-# Simulating a fictitious battle with each of the laws
-b = Battle(red=20_000, blue=30_000, rho=0.0150, beta=0.0120)
-Linear = LinearLaw(b, engagement_width=500)
-Square = SquareLaw(b)
-Log = LogarithmicLaw(b)
-Generalized = GeneralLaw(b, engagement_width=500, p=0.450, q=0.600)
+battle = Battle(red=20_000, blue=30_000)
+model = SquareLaw(rho=0.015, beta=0.012)  # rho: red's effectiveness, beta: blue's
 
-# If time is not specified, the battle goes on until one side is annihilated.
-print(Linear.simulate_battle() + "\n")
-print(Square.simulate_battle() + "\n")
-print(Log.simulate_battle() + "\n")
-print(Generalized.simulate_battle())
+result = model.simulate(battle)
+print(result)
+# Battle lasted 71.73 time units (blue wins by annihilation)
+# Red:  20,000 -> 1  (casualties 19,999)
+# Blue: 30,000 -> 20,000  (casualties 10,000)
+
+result.winner, result.duration, result.casualties
+result.at(10.0)  # exact (red, blue) strengths at t = 10
+result.t, result.red  # sampled trajectory as numpy arrays
+result.plot()  # needs jomini[plot]
 ```
-![Model-1](https://i.imgur.com/Uoz9bz4.png)
-![Model-2](https://i.imgur.com/9XlE6aA.png)
+
+Real armies rarely fight to the last man. A `breakpoint` makes a side break once it
+has lost that fraction of its starting strength:
+
+```python
+model.simulate(battle, breakpoint=0.3)  # both sides break at 30% losses
+model.simulate(battle, breakpoint=(0.5, 0.2))  # (red, blue)
+model.simulate(battle, t_max=20)  # stop the clock at t = 20
+```
+
+## The models
+
+Every model is a case of Bracken's generalised Lanchester law:
+
+```
+dR/dt = -beta · B^p · R^q
+dB/dt = -rho  · R^p · B^q
+```
+
+| Model | p | q | Use it for |
+|---|---|---|---|
+| `SquareLaw` | 1 | 0 | Aimed fire (musketry, Napoleonic line battles, modern direct fire). Fighting strength grows with the *square* of numbers. |
+| `LinearLaw` | 1 | 1 | Unaimed or area fire (artillery), and melee seen as many one-on-one duels. |
+| `LogarithmicLaw` | 0 | 1 | Losses driven by a side's own size (exposure, disease). Used by Weiss for the American Civil War. |
+| `GeneralLaw(rho, beta, p, q)` | any | any | Fitted battles that fall between the classic laws. |
+
+The linear and logarithmic laws only approach zero and never reach it, so a side counts as
+destroyed once it drops below `min_strength` (default `1.0`). If you work with
+normalised strengths such as `Battle(0.6, 1.0)`, scale it down, for example `min_strength=1e-3`.
+
+## Upgrading from 0.1.x
+
+1.0 is a rewrite. The old versions held each side's casualty rate fixed at its value at the
+start of the battle. That turned every law into a straight line and meant hand-tuned scale
+factors were needed to get sensible numbers. 1.0 solves the actual differential equations,
+so results will differ.
+
+- `Battle(red, blue, rho, beta)` became `Battle(red, blue)` plus `SquareLaw(rho, beta)`, and the same for the other laws.
+- `engagement_width` is gone: frontage now goes into the coefficients.
+- `get_casualties()`, `get_remaining()` and `simulate_battle()` became `simulate()`, which returns a `BattleResult` (use `.casualties`, `.remaining`, `.at(t)`, `str(result)`).
+- Import from `jomini`, not `jomini.Lanchester`.
+
+## Development
+
+```bash
+uv sync --all-extras
+uv run pytest
+uv run ruff check && uv run ruff format --check && uv run mypy
+```
+
+Releases are published to PyPI from GitHub releases through trusted publishing.
+
+## License
+
+MIT
