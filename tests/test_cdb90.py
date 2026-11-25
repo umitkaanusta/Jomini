@@ -84,3 +84,11 @@ def test_to_pandas() -> None:
     assert df.loc[145, "attacker_strength"] == 68_265
     assert df.loc[145, "attacker_actors"] == "France"
     assert int(df["fittable"].sum()) == 646
+
+
+def test_war_filter_matches_whole_words() -> None:
+    ww1 = cdb90.search(war="world war i")
+    assert ww1 and all("World War I " in b.war for b in ww1)
+    assert len(ww1) == len(cdb90.search(year_from=1914, year_to=1918, war="world war"))
+    assert cdb90.search(war="Yom Kippur")
+    assert cdb90.search(war="eastern front")  # theater
