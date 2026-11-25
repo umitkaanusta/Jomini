@@ -150,6 +150,32 @@ The ratings were assigned by analysts who already knew the outcome, so read the 
 as associations, not causes. The negative logistics effect is real in the data but
 unexplained.
 
+## Win probabilities: breakpoints and Monte Carlo
+
+Battles end when one side breaks, long before it is destroyed: in CDB90 the loser lost a
+median of 15% of its strength. `jomini.stochastic` models each side's breaking point as a
+random variable fitted to history. It's a log-normal fitted by maximum likelihood with
+censoring: the loser's losses *are* its breaking point, while the winner's only show that
+its own breaking point was higher. Armies broke at lower losses as warfare modernised (a
+median of 40% for an attacker in 1700, 18% in 1900), and defenders hold slightly longer.
+
+```python
+from jomini import LinearLaw, cdb90
+from jomini.stochastic import monte_carlo
+
+waterloo = cdb90.get("Waterloo")
+model = waterloo.fit(LinearLaw)
+print(monte_carlo(model, waterloo.to_battle(), year=1815, seed=0))
+# 2,000 runs: red wins 27.1%, blue wins 73.0%
+# ...
+```
+
+Options: fixed breaking points (`breakpoints=(0.3, 0.2)`), uncertainty about relative
+quality (`effectiveness_sd=...`) and a time limit (`t_max`). Cross-validated on CDB90, the
+breakpoint model picks the side that actually broke first 79% of the time, given each
+battle's attrition. Its probabilities are well calibrated: predictions of 10%, 30%, 50% and
+90% came true 13%, 30%, 56% and 94% of the time.
+
 ## AI military historian (MCP server)
 
 Jomini includes an [MCP](https://modelcontextprotocol.io) server, so Claude and other AI
@@ -162,7 +188,7 @@ men?" and get answers based on the data instead of guesses.
 | `search_battles` | Find battles by name, war, state, commander, year or outcome |
 | `get_battle` | Full record of one battle, including the narrative from the original study |
 | `fit_battle` | Fit a law to a battle and report each side's relative effectiveness |
-| `what_if` | Re-fight a battle with more or fewer troops, or better or worse ones, and compare with history |
+| `what_if` | Re-fight a battle with more or fewer troops, or better or worse ones, and compare with history, including each side's win probability |
 | `simulate_battle` | Simulate a hypothetical battle from scratch |
 | `estimate_law` | Find which law a group of battles follows (by war, state or era) |
 | `compare_effectiveness` | How deadly a state's soldiers were against their enemies, battle by battle |
