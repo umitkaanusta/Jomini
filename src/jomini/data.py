@@ -16,7 +16,10 @@ Fetched at runtime and cached (not bundled):
   losses since 25 Feb 2022 (PetroIvaniuk/2022-Ukraine-Russia-War-Dataset, MIT).
   **One side's claims about the other side**, so treat them as an upper-bound series.
 * :func:`ukraine_oryx`: visually confirmed equipment losses for both sides,
-  derived from Oryx (scarnecchia/oryx_data, CC BY 4.0), updated until August 2025.
+  derived from Oryx (scarnecchia/oryx_data, CC BY 4.0), updated until August 2025
+  (Ukrainian losses only from March 2025).
+* :func:`ukraine_oryx_events`: the same kind of data from individual Oryx entries,
+  both sides daily, February 2022 to August 2023 (leedrake5/Russia-Ukraine, MIT).
 """
 
 from __future__ import annotations
@@ -210,6 +213,7 @@ _GS_BASE = (
     "https://raw.githubusercontent.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset/main/data/"
 )
 _ORYX_URL = "https://raw.githubusercontent.com/scarnecchia/oryx_data/main/daily_count.csv"
+_ORYX_EVENTS_URL = "https://raw.githubusercontent.com/leedrake5/Russia-Ukraine/main/Apps/shinyApp/data/daily_frame.csv"
 Fetcher = Callable[[str], bytes]
 
 
@@ -261,6 +265,27 @@ class LossSeries:
         c = self.cumulative[category]
         out: NDArray[np.float64] = np.diff(c, prepend=c[0])
         return out
+
+    def resample(
+        self, every_days: int, start: date | None = None, end: date | None = None
+    ) -> LossSeries:
+        """Cumulative totals on a regular grid (carrying the last known total forward).
+
+        Use it to put two sources, or two sides recorded on different dates, on
+        common periods before comparing them.
+        """
+        if every_days < 1:
+            raise ValueError("every_days must be at least 1")
+        first = start or self.dates[0]
+        last = end or self.dates[-1]
+        known = np.array([(d - first).days for d in self.dates])
+        grid = np.arange(0, (last - first).days + 1, every_days)
+        idx = np.searchsorted(known, grid, side="right") - 1
+        dates = tuple(date.fromordinal(first.toordinal() + int(g)) for g in grid)
+        cumulative = {
+            k: np.where(idx >= 0, v[np.clip(idx, 0, None)], 0.0) for k, v in self.cumulative.items()
+        }
+        return LossSeries(dates, cumulative, self.source)
 
     def to_pandas(self) -> Any:
         import pandas as pd
@@ -323,6 +348,47 @@ def ukraine_oryx(
     if "All Types" not in cumulative:
         cumulative["All Types"] = np.sum(list(cumulative.values()), axis=0)
     return LossSeries(dates, cumulative, "Oryx via scarnecchia/oryx_data (CC BY 4.0)")
+
+
+def ukraine_oryx_events(
+    side: Literal["Russia", "Ukraine"],
+    *,
+    max_age_hours: float = 24 * 30,
+    fetch: Fetcher | None = None,
+) -> LossSeries:
+    """Visually confirmed equipment losses, daily by event date, Feb 2022 to Aug 2023.
+
+    Built from individual Oryx entries (leedrake5/Russia-Ukraine, MIT), so both
+    sides are on the same daily grid, unlike :func:`ukraine_oryx`. Categories are
+    Oryx classes (``"Tanks"``, ``"Infantry Fighting Vehicles"``, ...) plus
+    ``"All Types"``. Dates are when a loss was documented, which can lag the event.
+    """
+    if side not in ("Russia", "Ukraine"):
+        raise ValueError("side must be 'Russia' or 'Ukraine'")
+    text = _fetch(_ORYX_EVENTS_URL, max_age_hours, fetch).decode()
+    rows = list(csv.DictReader(io.StringIO(text)))
+    parsed = []
+    for r in rows:
+        try:
+            month, day, year = (int(x) for x in r["Date"].split("/"))
+        except (ValueError, KeyError):
+            continue
+        parsed.append((r["country"], date(year, month, day), r.get("class") or "NA"))
+    if not parsed:
+        raise ValueError("no dated events in the source")
+    first, last = min(p[1] for p in parsed), max(p[1] for p in parsed)
+    n = (last - first).days + 1
+    dates = tuple(date.fromordinal(first.toordinal() + i) for i in range(n))
+    counts: dict[str, NDArray[np.float64]] = {"All Types": np.zeros(n)}
+    for country, when, cls in parsed:
+        if country != side:
+            continue
+        i = (when - first).days
+        counts["All Types"][i] += 1
+        if cls != "NA":
+            counts.setdefault(cls, np.zeros(n))[i] += 1
+    cumulative = {k: np.cumsum(v) for k, v in counts.items()}
+    return LossSeries(dates, cumulative, "Oryx entries via leedrake5/Russia-Ukraine (MIT)")
 
 
 def _forward_fill(values: NDArray[np.float64]) -> NDArray[np.float64]:

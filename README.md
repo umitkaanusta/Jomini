@@ -243,7 +243,8 @@ data.ukraine_oryx("Russia"), data.ukraine_oryx("Ukraine")  # visually confirmed,
 | Kursk Data Base via Lucas & Turkes (2004) | 14 days × both sides: manpower, casualties, tanks, APCs, artillery | US Government work | bundled |
 | Livermore (1900) via jrnold/acw_battle_data | 63 major Civil War battles | public domain; compilation ODC-BY ([cite](https://doi.org/10.6084/m9.figshare.1515995)) | bundled |
 | Ukrainian General Staff via PetroIvaniuk | Russian losses, daily since 25 Feb 2022, 14+ categories | MIT | fetched at runtime |
-| Oryx via scarnecchia/oryx_data | Visually confirmed equipment losses, both sides, until Aug 2025 | CC BY 4.0 | fetched at runtime |
+| Oryx via scarnecchia/oryx_data | Visually confirmed equipment losses until Aug 2025 (Ukraine side from Mar 2025) | CC BY 4.0 | fetched at runtime |
+| Oryx entries via leedrake5/Russia-Ukraine | Confirmed losses by event date, both sides daily, Feb 2022 to Aug 2023 | MIT | fetched at runtime |
 
 The General Staff series is one side's unverified claims about the other side. Oryx counts
 only losses confirmed by photo or video, so it is a lower bound.
@@ -258,6 +259,34 @@ Two lessons came out of the new data:
   and Livermore share, the exponent agrees (0.90 vs 0.92). Across each source's full set it
   doesn't (CDB90 1.60, Livermore 0.24). An exponent estimated from one war's battles is only
   as good as the choice of battles.
+
+## Effectiveness that changes over time
+
+Constant coefficients don't describe a long war. `jomini.dynamics` treats relative
+effectiveness as a hidden random walk and recovers its path, with uncertainty, from loss
+counts. It uses a Kalman filter and RTS smoother, counting noise plus estimated
+overdispersion, and maximum-likelihood step sizes. Under the linear law strengths cancel,
+so per-period losses are enough.
+
+```python
+from jomini import data
+from jomini.dynamics import effectiveness_over_time, intensity_over_time
+
+ru = data.ukraine_oryx_events("Russia").resample(28)  # both sides, Feb 2022 to Aug 2023
+ua = data.ukraine_oryx_events("Ukraine").resample(28)
+path = effectiveness_over_time(ru.daily("Tanks")[1:], ua.daily("Tanks")[1:])
+path.ratio(), path.interval(0.9)  # Russia's relative effectiveness, 28-day steps
+```
+
+On visually confirmed equipment losses, Russia's relative effectiveness roughly doubled
+between 2022 (about 4 pieces of equipment lost per Ukrainian loss) and mid-2023 (about 2).
+For tanks the exchange flipped during Ukraine's 2023 counteroffensive, when Ukraine was
+attacking prepared defences. At Kursk, German per-soldier effectiveness peaked on 12 July,
+the day of Prokhorovka. Oryx counts only *documented* losses, and documentation rates
+differ by side and over time, so read these as trends in confirmed losses.
+
+`intensity_over_time` does the same for a single series, such as daily personnel losses
+claimed by the General Staff.
 
 ## AI military historian (MCP server)
 
