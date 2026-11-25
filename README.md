@@ -227,13 +227,13 @@ raises an error instead of guessing.
 ```python
 from jomini import data
 
-kursk = data.kursk()             # daily, both sides, 5-18 July 1943 (public domain)
+kursk = data.kursk()  # daily, both sides, 5-18 July 1943 (public domain)
 kursk.series["soviet"]["tanks_lost"]  # 414 on 12 July, at Prokhorovka
 t, german, soviet = kursk.trajectory("combat_power")
 
-data.livermore()                 # 63 Civil War battles (Livermore 1900), as HistoricalBattle
+data.livermore()  # 63 Civil War battles (Livermore 1900), as HistoricalBattle
 
-gs = data.ukraine_general_staff()   # daily Russian losses claimed by Ukraine (fetched, cached)
+gs = data.ukraine_general_staff()  # daily Russian losses claimed by Ukraine (fetched, cached)
 gs.daily("tank"), gs.cumulative["personnel"]
 data.ukraine_oryx("Russia"), data.ukraine_oryx("Ukraine")  # visually confirmed, both sides
 ```
