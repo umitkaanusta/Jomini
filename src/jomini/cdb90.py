@@ -17,6 +17,7 @@ import csv
 import difflib
 import gzip
 import io
+import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, fields
 from datetime import date
@@ -297,7 +298,8 @@ def search(
     winner: Winner | None = None,
     fittable: bool | None = None,
 ) -> list[HistoricalBattle]:
-    """Filter battles. String filters are case-insensitive substring matches.
+    """Filter battles. String filters are case-insensitive substring matches, except
+    ``war``, which matches whole words (``"world war i"`` excludes World War II).
 
     ``text`` searches names, campaigns, locations and Wikipedia titles; ``actor``
     and ``commander`` match either side.
@@ -307,12 +309,14 @@ def search(
         n = needle.casefold()
         return any(h is not None and n in h.casefold() for h in haystack)
 
+    # Whole-word match so "World War I" does not also match "World War II".
+    war_pattern = re.compile(rf"(?<!\w){re.escape(war.strip())}(?!\w)", re.I) if war else None
     out = []
     for b in battles():
         sides = (b.attacker, b.defender)
         if text and not has((b.name, b.campaign, b.location, b.wikipedia_title), text):
             continue
-        if war and not has((b.war, b.theater), war):
+        if war_pattern and not any(war_pattern.search(h) for h in (b.war, b.theater) if h):
             continue
         if actor and not has((x for s in sides for x in (*s.actors, s.force)), actor):
             continue

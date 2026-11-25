@@ -131,7 +131,8 @@ def search_battles(
 ) -> dict[str, Any]:
     """Find battles in CDB90 (660 land battles, 1600-1982).
 
-    String filters are case-insensitive substrings. `query` matches battle names,
+    String filters are case-insensitive substrings, except `war`, which matches whole
+    words ("World War I" excludes World War II). `query` matches battle names,
     campaigns, locations and Wikipedia titles; `actor` matches a state or army on either
     side (e.g. "Germany", "Confederacy"); `commander` matches either side's commanders.
     Returns summaries; call get_battle for full details.
