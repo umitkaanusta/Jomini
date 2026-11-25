@@ -63,6 +63,20 @@ def read(source: str | None, table: str) -> pd.DataFrame:
 
 
 WINNER = {1: "attacker", -1: "defender", 0: "draw"}
+# Analysts' ratings of the attacker's relative advantage (negative = defender's advantage).
+ADVANTAGES = {
+    "surpa": "surprise",
+    "aeroa": "air_superiority",
+    "leada": "leadership",
+    "trnga": "training",
+    "morala": "morale",
+    "logsa": "logistics",
+    "momnta": "momentum",
+    "intela": "intelligence",
+    "techa": "technology",
+    "inita": "initiative",
+}
+POSTURE = {"HD": "hasty", "PD": "prepared", "FD": "fortified", "DL": "delay", "WD": "withdrawal"}
 SIDE_COLUMNS = {
     "nam": "force",
     "actors": "actors",
@@ -98,8 +112,11 @@ def build(source: str | None) -> None:
             "longitude": battles.longitude,
             "front_width_km": battles.front_width_attacker,
             "winner": battles.wina.map(WINNER),
+            "defender_posture": battles.post1.map(POSTURE),
         }
     )
+    for src, dst in ADVANTAGES.items():
+        table[f"adv_{dst}"] = battles[src].astype("Int64")
     for role, is_attacker in (("attacker", True), ("defender", False)):
         side = sides[sides.is_attacker == is_attacker].set_index("isqno")
         for src, dst in SIDE_COLUMNS.items():
