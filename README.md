@@ -176,6 +176,50 @@ breakpoint model picks the side that actually broke first 79% of the time, given
 battle's attrition. Its probabilities are well calibrated: predictions of 10%, 30%, 50% and
 90% came true 13%, 30%, 56% and 94% of the time.
 
+## Modern warfare: salvos, mixed forces and learning laws from data
+
+**Salvo exchanges** (Hughes 1995) model fights decided by volleys of missiles or drones
+against interceptors, where defences can absorb a whole salvo and striking first decides
+the outcome:
+
+```python
+from jomini.modern import SalvoModel, SalvoSide
+
+ship = SalvoSide(offense=4, defense=2, staying_power=1)
+SalvoModel(ship, ship).simulate(3, 2).winner  # "red"
+SalvoModel(ship, ship).simulate(3, 2, first="blue").winner  # "blue": a surprise strike flips it
+```
+
+**Mixed forces** fight with a kill-rate matrix between unit types and fire spread over
+whatever targets remain:
+
+```python
+from jomini.modern import MixedForceLaw
+
+law = MixedForceLaw.from_rates(
+    red_kills={"drone": {"tank": 0.02, "infantry": 0.1}, "tank": {"tank": 0.05, "infantry": 0.2}},
+    blue_kills={"tank": {"tank": 0.05}, "infantry": {"tank": 0.002, "drone": 0.01}},
+)
+law.simulate({"drone": 200, "tank": 50}, {"tank": 80, "infantry": 1000}, t_max=50, breakpoint=0.4)
+```
+
+**Learning the law from loss time series** (daily casualties, or equipment losses from
+trackers like WarSpotting). `fit_power_law` fits each side's exponents with standard
+errors, so asymmetric laws show up. `sindy` discovers the equations by sparse regression,
+as in recent Russia–Ukraine studies:
+
+```python
+from jomini.discovery import fit_power_law, sindy
+
+fit_power_law([(t, red, blue)])
+sindy([(t1, red1, blue1), (t2, red2, blue2), ...])
+```
+
+Pass several engagements with different starting strengths where you can. Along a single
+trajectory, Lanchester laws conserve a quantity (`ρR² − βB²` for the square law) that makes
+the law impossible to identify. `sindy` then returns spurious terms, and `fit_power_law`
+raises an error instead of guessing.
+
 ## AI military historian (MCP server)
 
 Jomini includes an [MCP](https://modelcontextprotocol.io) server, so Claude and other AI
@@ -193,6 +237,7 @@ men?" and get answers based on the data instead of guesses.
 | `estimate_law` | Find which law a group of battles follows (by war, state or era) |
 | `compare_effectiveness` | How deadly a state's soldiers were against their enemies, battle by battle |
 | `combat_power` | Which factors (leadership, surprise, posture, ...) made soldiers deadlier, overall or for one battle |
+| `salvo_exchange` | Missile, drone-swarm or naval exchanges with Hughes' salvo model |
 
 **Claude Code:**
 
