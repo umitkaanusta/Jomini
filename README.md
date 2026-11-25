@@ -64,6 +64,35 @@ A single observation determines `rho` and `beta` exactly. Fitting `p` and `q` as
 observations at two or more times, plus enough attrition for the curves to bend. If losses
 are small, the laws all look like straight lines and the exponents can't be told apart.
 
+## 660 historical battles built in
+
+Jomini ships with **CDB90**, the US Army Concepts Analysis Agency's database of 660 land
+battles from 1600 to 1982. Each battle includes strengths, losses, duration, commanders,
+outcome, coordinates and Wikipedia links, and 610 include a written account of the battle.
+
+```python
+from jomini import SquareLaw, cdb90
+
+waterloo = cdb90.get("Waterloo")
+print(waterloo)
+# Waterloo (1815-06-18, Hundred Days of 1814)
+# Attacker: France: 68,265 men, 25,000 casualties
+# Defender: Great Britain, Prussia: 137,547 men, 22,500 casualties
+# Winner: defender
+
+model = waterloo.fit(SquareLaw)  # attacker = red, defender = blue; time in days
+model.rho / model.beta  # ~2.0: each French soldier was about twice as effective
+
+waterloo.narrative  # the full account from the original study
+cdb90.search(commander="napoleon", year_from=1805)
+cdb90.search(war="world war ii", winner="defender", fittable=True)
+cdb90.to_pandas()  # one row per battle, needs jomini[pandas]
+```
+
+The data is the cleaned, open edition maintained by Jeffrey Arnold at
+[jrnold/CDB90](https://github.com/jrnold/CDB90) (CC0, release 10.8.0), built from the
+original CAA/HERO data. `scripts/build_cdb90.py` rebuilds the bundled copy from it.
+
 ## The models
 
 Every model is a case of Bracken's generalised Lanchester law:
