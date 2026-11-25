@@ -40,6 +40,9 @@ Homepage = "https://github.com/umitkaanusta/Jomini"
 Issues = "https://github.com/umitkaanusta/Jomini/issues"
 
 [dependency-groups]
+bench = [
+    "anthropic>=1.0",
+]
 dev = ["pytest>=8", "hypothesis>=6.100", "ruff>=0.6", "mypy>=1.11"]
 
 [tool.hatch.build.targets.wheel]
