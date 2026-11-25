@@ -39,6 +39,8 @@ def test_lists_all_tools_as_read_only() -> None:
         "breakpoint_distribution",
         "conflict_events",
         "escalation_model",
+        "air_defense_raid",
+        "air_defense_saturation_test",
     }
     assert all(t.annotations and t.annotations.read_only_hint for t in tools)
 
@@ -338,3 +340,34 @@ def test_conflict_tools_with_stubbed_ged(monkeypatch: pytest.MonkeyPatch) -> Non
         call("conflict_events")
     with pytest.raises(ToolError):
         call("conflict_events", country="Ukraine", start="last tuesday")
+
+
+def test_air_defense_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    raid = call("air_defense_raid", raid_sizes=[50, 100, 200], nights=5)
+    assert [r["launched"] for r in raid["raids"]] == [50, 100, 200]
+    assert all(e > 1 for e in raid["leak_elasticity"])
+    assert len(raid["campaign"]["leak_fraction_by_night"]) == 5
+    assert "randow2026" in raid["provenance"]["cite_keys"]
+    surged = call("air_defense_raid", raid_sizes=[50, 200], surge=1.0)
+    assert surged["raids"][1]["leak_fraction"] < surged["raids"][0]["leak_fraction"]
+    with pytest.raises(ToolError):
+        call("air_defense_raid", raid_sizes=[])
+
+    from datetime import date, timedelta
+
+    import numpy as np
+
+    from jomini import data
+
+    rng = np.random.default_rng(0)
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(120)]
+    launched = np.round(np.exp(rng.normal(4.5, 0.6, 120)))
+    stopped = np.round(launched * 0.85)
+    nights = data.RaidNights(tuple(days), launched, stopped, stopped, np.full(120, np.nan), "drone")
+    monkeypatch.setattr(data, "ukraine_air_raids", lambda weapon: nights)
+    sat = call("air_defense_saturation_test")
+    assert sat["nights"] == 120 and sat["months"] == 4
+    assert abs(sat["slope"]) < 0.2 and sat["stopped_share"] == pytest.approx(0.85, abs=0.01)
+    assert "ivaniuk_missiles" in sat["provenance"]["cite_keys"]
+    with pytest.raises(ToolError):
+        call("air_defense_saturation_test", start="yesterday")
