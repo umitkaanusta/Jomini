@@ -86,3 +86,13 @@ def test_ged_loader_select_and_daily() -> None:
         ru.daily("morale")
     with pytest.raises(ValueError):
         ged.select(country="Atlantis").daily()
+
+
+def test_candidate_loader_reads_plain_csv() -> None:
+    rows = [
+        "1,2026-02-28 00:00:00.000,2026-02-28 00:00:00.000,Iran - Israel,Government of Iran - "
+        "Government of Israel,Iran,Israel,Iran,50,0,20,0,70,60,90,35.7,51.4,1,1",
+    ]
+    csv_bytes = ("\n".join([GED_HEADER, *rows]) + "\n").encode()
+    cand = data.ucdp_candidate(fetch=lambda url: csv_bytes)
+    assert len(cand) == 1 and cand.select(conflict="iran")["best"][0] == 70

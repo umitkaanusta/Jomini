@@ -324,7 +324,29 @@ understates a true branching ratio of 0.5 by about 10–20%.
 In UCDP's per-side battle-death estimates for Russia–Ukraine, Russia's relative
 effectiveness (`effectiveness_trend(source="ucdp")`) fell from about 0.7 in 2022 to about
 0.12 in late 2025, roughly 8 Russian deaths per Ukrainian death. UCDP codes events from
-reports that may echo each side's claims, so this is not independent of official figures.
+reports that may echo each side's claims, so this is not independent of official figures. Reporting is also asymmetric: part of the falling ratio may reflect Ukrainian losses
+being reported less rather than changing effectiveness. UCDP's provisional 2026 data shows
+the extreme case, with Ukrainian deaths falling to single digits per month from February
+2026 while Russian deaths stay in the thousands.
+
+## The 2026 Iran war
+
+`data.ucdp_candidate()` loads UCDP's provisional events for January–September 2026, which
+include the war that began with US and Israeli strikes on Iran on 28 February 2026 and
+ended with the 9 April ceasefire. The MCP conflict tools take `dataset="candidate"`.
+
+| | Twelve-Day War (June 2025, GED) | 2026 war (Candidate GED) |
+|---|---|---|
+| Events (Iran vs Israel/US dyad) | 43 | 459 (410 before the ceasefire) |
+| Deaths, best estimate | 1,218 | ~3,860 |
+| Iranian military / Israeli & US / civilian | 433 / 1 / 465 | 1,274 / 11 / 1,774 |
+| Pattern | decays within days | opening shock (103 events on day 1), event rate halving about every 14 days |
+
+It was a stand-off war of strikes and missile salvos, not ground combat, so Lanchester
+exchange ratios don't apply. In both wars UCDP records Israeli deaths mostly as civilian,
+far below Israeli reports. Per-wave salvo data for Iranian attacks (an OSINT compilation)
+is too sparse to fit a saturation model: only the April 2024 attack has interception
+counts.
 
 ## AI military historian (MCP server)
 

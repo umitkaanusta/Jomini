@@ -492,12 +492,19 @@ def _epoch_day(d: date) -> int:
 
 @cache
 def _ged_cached(path: str, mtime: float) -> ConflictEvents:
+    import contextlib
     import zipfile
 
-    with zipfile.ZipFile(path) as zf:
-        name = next(n for n in zf.namelist() if n.endswith(".csv"))
-        with zf.open(name) as raw:
-            reader = csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8"))
+    with contextlib.ExitStack() as stack:
+        if path.endswith(".zip"):
+            zf = stack.enter_context(zipfile.ZipFile(path))
+            name = next(n for n in zf.namelist() if n.endswith(".csv"))
+            raw = stack.enter_context(zf.open(name))
+            text: Any = io.TextIOWrapper(raw, encoding="utf-8")
+        else:
+            text = stack.enter_context(open(path, encoding="utf-8", newline=""))
+        if True:
+            reader = csv.DictReader(text)
             starts: list[int] = []
             ends: list[int] = []
             strs: dict[str, list[str]] = {k: [] for k in _GED_STR}
@@ -531,6 +538,36 @@ def ucdp_ged(*, max_age_hours: float = 24 * 90, fetch: Fetcher | None = None) ->
     path = _cache_dir() / _UCDP_GED_URL.rsplit("/", 1)[-1]
     if not path.exists() or time.time() - path.stat().st_mtime > max_age_hours * 3600:
         path.write_bytes(_http_get(_UCDP_GED_URL))
+    return _ged_cached(str(path), path.stat().st_mtime)
+
+
+UCDP_CANDIDATE_VERSION = "26.01.26.09"
+_UCDP_CANDIDATE_URL = "https://ucdp.uu.se/downloads/candidateged/GEDEvent_v{version}.csv"
+
+
+def ucdp_candidate(
+    version: str = UCDP_CANDIDATE_VERSION,
+    *,
+    max_age_hours: float = 24 * 30,
+    fetch: Fetcher | None = None,
+) -> ConflictEvents:
+    """UCDP Candidate GED: provisional events for the current year (CC BY 4.0).
+
+    The default release covers January to September 2026, including the 2026 Iran
+    war (28 February - 9 April ceasefire). Same fields as :func:`ucdp_ged`. Candidate
+    events are coded quickly and revised later, so per-side deaths can be badly
+    incomplete: in this release Ukrainian deaths in the Russia-Ukraine war fall to
+    single digits per month from February 2026 while Russian deaths stay in the
+    thousands. Check per-side series before comparing sides.
+    """
+    url = _UCDP_CANDIDATE_URL.format(version=version.replace(".", "_"))
+    if fetch is not None:
+        tmp = _cache_dir() / f"candidate-injected-{version}.csv"
+        tmp.write_bytes(fetch(url))
+        return _ged_cached(str(tmp), tmp.stat().st_mtime)
+    path = _cache_dir() / url.rsplit("/", 1)[-1]
+    if not path.exists() or time.time() - path.stat().st_mtime > max_age_hours * 3600:
+        path.write_bytes(_http_get(url))
     return _ged_cached(str(path), path.stat().st_mtime)
 
 

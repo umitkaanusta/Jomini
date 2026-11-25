@@ -409,7 +409,27 @@ DATASETS: dict[str, Dataset] = {
                 "Coded from news and other reports: coverage varies by place and time.",
                 "Per-side deaths for Russia-Ukraine rely on sources that may echo each "
                 "belligerent's claims; not independent of official figures.",
+                "Reporting is asymmetric: a falling Russia/Ukraine death ratio can reflect "
+                "Ukrainian losses being reported less, not only changing effectiveness.",
                 "Events spanning several days are spread evenly over them when aggregated.",
+            ),
+        ),
+        Dataset(
+            "ucdp_candidate",
+            "UCDP Candidate GED (provisional, current year)",
+            "Events of organised violence Jan-Sep 2026 (release 26.01.26.09), incl. the "
+            "2026 Iran war; same fields as UCDP GED",
+            "event",
+            "fetched",
+            "CC BY 4.0",
+            "jomini.data.ucdp_candidate()",
+            ("sundberg2013", "davies2026"),
+            (
+                "Provisional: coded quickly and revised later.",
+                "Per-side deaths can be badly incomplete: Ukrainian deaths fall to single "
+                "digits per month from Feb 2026 while Russian deaths stay in the thousands.",
+                "In the Iran-Israel/US dyad, Israeli deaths appear mostly as civilian, so "
+                "the side-B count is far below Israeli reports.",
             ),
         ),
         Dataset(
