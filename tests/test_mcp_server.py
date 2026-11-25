@@ -30,6 +30,13 @@ def test_lists_all_tools_as_read_only() -> None:
         "compare_effectiveness",
         "combat_power",
         "salvo_exchange",
+        "list_datasets",
+        "cite",
+        "get_loss_series",
+        "effectiveness_trend",
+        "loss_intensity",
+        "fit_law_to_series",
+        "breakpoint_distribution",
     }
     assert all(t.annotations and t.annotations.read_only_hint for t in tools)
 
@@ -168,3 +175,112 @@ def test_salvo_tool() -> None:
     assert call("salvo_exchange", **args, first="defender")["winner"] == "defender"
     with pytest.raises(ToolError):
         call("salvo_exchange", **{**args, "attacker_staying_power": 0})
+
+
+def test_research_tools_listed_with_provenance() -> None:
+    names = {t.name for t in asyncio.run(server.list_tools())}
+    assert {
+        "list_datasets",
+        "cite",
+        "get_loss_series",
+        "effectiveness_trend",
+        "loss_intensity",
+        "fit_law_to_series",
+        "breakpoint_distribution",
+    } <= names
+    out = call("what_if", battle="Waterloo")
+    assert "helmbold1971" in out["provenance"]["cite_keys"]
+    assert out["provenance"]["jomini_version"]
+
+
+def test_catalog_and_cite_tools() -> None:
+    cat = call("list_datasets")
+    ids = {d["id"] for d in cat["datasets"]}
+    assert {"cdb90", "kursk", "livermore", "ukraine_general_staff"} <= ids
+    assert all(d["caveats"] for d in cat["datasets"])
+    bib = call("cite", keys=["kursk", "kalman"])
+    assert "@article{lucas2004" in bib["bibtex"] and "jomini" in bib["labels"]
+    with pytest.raises(ToolError):
+        call("cite", keys=["narnia"])
+
+
+def test_kursk_series_tools() -> None:
+    s = call("get_loss_series", source="kursk", category="tanks_lost", side="soviet")
+    assert s["points"][7] == {"date": "1943-07-12", "value": 414.0}
+    trend = call("effectiveness_trend", source="kursk")
+    assert len(trend["points"]) == 14 and all(p["ratio"] > 1 for p in trend["points"])
+    assert trend["points"][0]["low"] < trend["points"][0]["ratio"] < trend["points"][0]["high"]
+    with pytest.raises(ToolError):
+        call("get_loss_series", source="kursk", category="tanks_lost", side="russia")
+    with pytest.raises(ToolError):
+        call("effectiveness_trend", source="kursk", category="morale")
+
+
+def test_estimate_law_on_livermore_and_breakpoints() -> None:
+    out = call("estimate_law", dataset="livermore")
+    assert out["n_battles"] == 48 and not out["adjusted_for_quality"]
+    assert "livermore1900" in out["provenance"]["cite_keys"]
+    bp = call("breakpoint_distribution", year=1944)
+    assert bp["attacker"]["0.1"] < bp["attacker"]["0.5"] < bp["attacker"]["0.9"]
+
+
+def test_fit_law_tool_reports_uncertainty() -> None:
+    from jomini import data
+
+    k = data.kursk()
+    g, s = k.series["german"], k.series["soviet"]
+    out = call(
+        "fit_law_to_series",
+        red=list(g["manpower"]),
+        blue=list(s["manpower"]),
+        red_losses=list(g["casualties"]),
+        blue_losses=list(s["casualties"]),
+    )
+    assert out["red"]["q_se"] > 3  # not identified, and the tool says so
+    with pytest.raises(ToolError):
+        call("fit_law_to_series", red=[1, 2], blue=[1, 2], red_losses=[0, 0], blue_losses=[0, 0])
+
+
+def test_ukraine_tools_with_stubbed_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import date, timedelta
+
+    import numpy as np
+
+    from jomini import data
+
+    days = tuple(date(2022, 3, 1) + timedelta(days=i) for i in range(200))
+    rng = np.random.default_rng(0)
+
+    def fake_events(side: str, **_: object) -> data.LossSeries:
+        rate = 12.0 if side == "Russia" else 4.0  # Russia loses 3x as much
+        daily = rng.poisson(rate, len(days)).astype(float)
+        return data.LossSeries(
+            days, {"All Types": np.cumsum(daily), "Tanks": np.cumsum(daily / 4)}, "stub"
+        )
+
+    def fake_gs(**_: object) -> data.LossSeries:
+        return data.LossSeries(days, {"personnel": np.cumsum(np.full(len(days), 500.0))}, "stub")
+
+    monkeypatch.setattr(data, "ukraine_oryx_events", fake_events)
+    monkeypatch.setattr(data, "ukraine_general_staff", fake_gs)
+    trend = call("effectiveness_trend", source="ukraine_oryx_events", every_days=14)
+    assert trend["red"] == "russia" and len(trend["points"]) >= 10
+    assert all(0.2 < p["ratio"] < 0.5 for p in trend["points"])  # ~1/3
+    with pytest.raises(ToolError, match="unknown category"):
+        call("effectiveness_trend", source="ukraine_oryx_events", category="Battleships")
+    rate = call(
+        "loss_intensity", source="ukraine_general_staff", category="personnel", every_days=7
+    )
+    assert all(abs(p["rate"] - 3500) / 3500 < 0.05 for p in rate["points"])
+    series = call(
+        "get_loss_series",
+        source="ukraine_oryx_events",
+        category="All Types",
+        side="ukraine",
+        every_days=28,
+    )
+    assert series["points"][-1]["cumulative"] > 0
+    with pytest.raises(ToolError):
+        call(
+            "get_loss_series", source="ukraine_general_staff", category="personnel", side="ukraine"
+        )
