@@ -220,6 +220,45 @@ trajectory, Lanchester laws conserve a quantity (`ρR² − βB²` for the squar
 the law impossible to identify. `sindy` then returns spurious terms, and `fit_power_law`
 raises an error instead of guessing.
 
+## More data: Kursk day by day, the Civil War, and Ukraine
+
+`jomini.data` adds three sources beyond CDB90:
+
+```python
+from jomini import data
+
+kursk = data.kursk()  # daily, both sides, 5-18 July 1943 (public domain)
+kursk.series["soviet"]["tanks_lost"]  # 414 on 12 July, at Prokhorovka
+t, german, soviet = kursk.trajectory("combat_power")
+
+data.livermore()  # 63 Civil War battles (Livermore 1900), as HistoricalBattle
+
+gs = data.ukraine_general_staff()  # daily Russian losses claimed by Ukraine (fetched, cached)
+gs.daily("tank"), gs.cumulative["personnel"]
+data.ukraine_oryx("Russia"), data.ukraine_oryx("Ukraine")  # visually confirmed, both sides
+```
+
+| Source | Coverage | Licence | How |
+|---|---|---|---|
+| Kursk Data Base via Lucas & Turkes (2004) | 14 days × both sides: manpower, casualties, tanks, APCs, artillery | US Government work | bundled |
+| Livermore (1900) via jrnold/acw_battle_data | 63 major Civil War battles | public domain; compilation ODC-BY ([cite](https://doi.org/10.6084/m9.figshare.1515995)) | bundled |
+| Ukrainian General Staff via PetroIvaniuk | Russian losses, daily since 25 Feb 2022, 14+ categories | MIT | fetched at runtime |
+| Oryx via scarnecchia/oryx_data | Visually confirmed equipment losses, both sides, until Aug 2025 | CC BY 4.0 | fetched at runtime |
+
+The General Staff series is one side's unverified claims about the other side. Oryx counts
+only losses confirmed by photo or video, so it is a lower bound.
+
+Two lessons came out of the new data:
+
+- **Kursk can't pin down a law.** Fitting losses to strengths
+  (`fit_power_law_from_losses`) gives exponents around 6, with huge standard errors. Lucas &
+  Turkes and Clemens got the same result. Over 14 days German manpower only moved between
+  296k and 307k, too little variation to identify the exponents.
+- **Battle selection matters as much as numbers.** For the 18 Civil War battles that CDB90
+  and Livermore share, the exponent agrees (0.90 vs 0.92). Across each source's full set it
+  doesn't (CDB90 1.60, Livermore 0.24). An exponent estimated from one war's battles is only
+  as good as the choice of battles.
+
 ## AI military historian (MCP server)
 
 Jomini includes an [MCP](https://modelcontextprotocol.io) server, so Claude and other AI

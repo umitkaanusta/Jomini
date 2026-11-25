@@ -139,6 +139,34 @@ def fit_power_law(
     )
 
 
+def fit_power_law_from_losses(
+    red: ArrayLike,
+    blue: ArrayLike,
+    red_losses: ArrayLike,
+    blue_losses: ArrayLike,
+    *,
+    dt: float | ArrayLike = 1.0,
+) -> PowerLawFit:
+    """Fit Bracken's law from *reported losses* per period instead of strength changes.
+
+    Use this when strengths include reinforcements (e.g. daily on-hand counts), so
+    that losses can't be recovered by differencing. ``red``/``blue`` are strengths
+    at the start of each period and ``*_losses`` the losses during it; ``dt`` is the
+    period length (scalar or per period).
+    """
+    r, b, lr, lb = (np.asarray(x, float) for x in (red, blue, red_losses, blue_losses))
+    if not (r.ndim == b.ndim == lr.ndim == lb.ndim == 1 and r.size == b.size == lr.size == lb.size):
+        raise ValueError("strengths and losses must be 1-D sequences of equal length")
+    if r.size < 5:
+        raise ValueError("need at least 5 periods")
+    if np.any(r <= 0) or np.any(b <= 0) or np.any(lr < 0) or np.any(lb < 0):
+        raise ValueError("strengths must be positive and losses non-negative")
+    step = np.broadcast_to(np.asarray(dt, float), r.shape)
+    if np.any(step <= 0):
+        raise ValueError("dt must be positive")
+    return PowerLawFit(red=_fit_side(lr / step, b, r), blue=_fit_side(lb / step, r, b))
+
+
 @dataclass(frozen=True)
 class SindyModel:
     """Discovered ``dR/dt`` and ``dB/dt`` as sparse sums of library terms."""
