@@ -125,3 +125,27 @@ def test_estimate_law_quality_adjustment() -> None:
     plain = call("estimate_law", adjust_for_quality=False)
     assert adjusted["adjusted_for_quality"] and not plain["adjusted_for_quality"]
     assert adjusted["exponent"] > plain["exponent"]
+
+
+def test_win_probabilities() -> None:
+    out = call("what_if", battle="Waterloo", attacker_strength_factor=1.5)
+    hist, cf = out["win_probability"]["historical_setup"], out["win_probability"]["counterfactual"]
+    assert 0 < hist["attacker"] < cf["attacker"] < 1
+    assert hist["attacker"] + hist["defender"] == pytest.approx(1, abs=0.01)
+    sim = call(
+        "simulate_battle",
+        attacker_strength=10_000,
+        defender_strength=10_000,
+        rho=1e-5,
+        beta=1e-5,
+        win_probability_runs=500,
+        year=1944,
+    )
+    assert sim["win_probability"]["runs"] == 500
+    assert abs(sim["win_probability"]["attacker"] - 0.5) < 0.1
+    assert (
+        call("simulate_battle", attacker_strength=10, defender_strength=10, rho=0.1, beta=0.1)[
+            "win_probability"
+        ]
+        is None
+    )

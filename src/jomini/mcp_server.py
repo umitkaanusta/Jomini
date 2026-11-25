@@ -20,6 +20,7 @@ from jomini import Battle, GeneralLaw, LinearLaw, LogarithmicLaw, SquareLaw, cdb
 from jomini.cdb90 import HistoricalBattle, Side
 from jomini.models import LanchesterModel
 from jomini.research import combat_power_model, estimate_exponent, relative_effectiveness
+from jomini.stochastic import monte_carlo
 
 LawName = Literal["square", "linear", "logarithmic"]
 _LAWS: dict[str, tuple[type[LanchesterModel], float]] = {
@@ -236,9 +237,11 @@ def what_if(
     Fits `law` to what actually happened, then multiplies each side's starting strength
     and per-soldier effectiveness by the given factors (e.g. attacker_strength_factor=1.2
     for 20% more attackers) and simulates the same duration (or `duration_days`).
-    Compares each side's casualties and share of strength lost with history. The side
-    losing the larger share usually came off worse, but the model does not predict
-    morale collapse or manoeuvre, so present results as estimates.
+    Compares each side's casualties and share of strength lost with history, and gives
+    each side's win probability in the historical and changed setups: 1,000 runs with
+    breaking points (the losses a side takes before it quits) drawn from a model fitted
+    to CDB90 for the battle's era. The model captures attrition and morale breaking,
+    not manoeuvre, so present results as estimates.
     """
     b = _lookup(battle)
     _require_fittable(b)
@@ -295,10 +298,18 @@ def what_if(
             else "defender"
         )
 
+    def odds(m: LanchesterModel, setup: Battle) -> dict[str, float | None]:
+        mc = monte_carlo(m, setup, n=1000, year=b.year, seed=0)
+        return {"attacker": _round(mc.p_red, 3), "defender": _round(mc.p_blue, 3)}
+
     return {
         "battle": _summary(b),
         "law": law,
         "changes": factors | {"duration_days": days},
+        "win_probability": {
+            "historical_setup": odds(model, b.to_battle()),
+            "counterfactual": odds(changed, scenario),
+        },
         "historical": hist,
         "counterfactual": counter,
         "side_losing_larger_share": {
@@ -319,6 +330,8 @@ def simulate_battle(
     q: float | None = None,
     breakpoint: float | None = None,
     max_time: float | None = None,
+    win_probability_runs: int = 0,
+    year: int = 1900,
 ) -> dict[str, Any]:
     """Simulate a hypothetical battle from scratch with a Lanchester model.
 
@@ -327,6 +340,8 @@ def simulate_battle(
     Bracken exponents p and q for the general law dR/dt = -beta * B^p * R^q.
     `breakpoint` is the fraction of its strength a side can lose before it breaks
     (e.g. 0.3); without it the fight continues until one side is gone or max_time.
+    With win_probability_runs > 0 (up to 5000), also runs that many battles with random
+    breaking points fitted to CDB90 for `year` and reports each side's win probability.
     """
     try:
         battle = Battle(attacker_strength, defender_strength)
@@ -338,9 +353,22 @@ def simulate_battle(
         else:
             model = _LAWS[law][0](rho, beta)
         result = model.simulate(battle, t_max=max_time, breakpoint=breakpoint, n_points=11)
+        odds = None
+        if win_probability_runs:
+            if not 0 < win_probability_runs <= 5000:
+                raise ToolError("win_probability_runs must be between 1 and 5000")
+            mc = monte_carlo(model, battle, n=win_probability_runs, year=year, seed=0)
+            odds = {
+                "attacker": _round(mc.p_red, 3),
+                "defender": _round(mc.p_blue, 3),
+                "undecided": _round(mc.p_undecided, 3),
+                "runs": mc.n,
+                "year": year,
+            }
     except (ValueError, TypeError, RuntimeError) as exc:
         raise ToolError(str(exc)) from None
     return {
+        "win_probability": odds,
         "winner": _ROLE.get(result.winner or ""),
         "outcome": result.outcome.value,
         "duration": _round(result.duration),
