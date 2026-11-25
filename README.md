@@ -288,6 +288,44 @@ differ by side and over time, so read these as trends in confirmed losses.
 `intensity_over_time` does the same for a single series, such as daily personnel losses
 claimed by the General Staff.
 
+## Conflict events and escalation (UCDP GED)
+
+`data.ucdp_ged()` loads the UCDP Georeferenced Event Dataset 26.1: about 418,000 events of
+organised violence worldwide from 1989 to 2025, with deaths per side (CC BY 4.0, fetched
+once and cached). `jomini.escalation` fits self-exciting (Hawkes) models to daily counts.
+They measure how much violence feeds on itself:
+
+```python
+from datetime import date
+
+import numpy as np
+
+from jomini import data
+from jomini.escalation import fit_hawkes
+
+ged = data.ucdp_ged()
+ru = ged.select(conflict="Russia - Ukraine", start=date(2022, 2, 24))
+events = ru.daily("events").daily("events")
+print(fit_hawkes(events))  # branching ratio ~0.69, half-life ~1 day
+```
+
+| Conflict | Branching ratio (spline background) | Half-life |
+|---|---|---|
+| Russia–Ukraine, 2022–25 | 0.69 | 1.0 days |
+| Syria, 2012–16 | 0.56 | 1.3 days |
+| Sudan, 2023–25 | 0.23 | 0.1 days |
+
+A war whose intensity drifts (offensives, mobilisation, lulls) looks like contagion to a
+model with a constant background rate. In simulations with a drifting background and *no*
+excitation, the constant-background fit reported a branching ratio of 0.98 (p < 1e-200).
+The default spline background reported 0.00. The spline fit is conservative: it
+understates a true branching ratio of 0.5 by about 10–20%.
+
+In UCDP's per-side battle-death estimates for Russia–Ukraine, Russia's relative
+effectiveness (`effectiveness_trend(source="ucdp")`) fell from about 0.7 in 2022 to about
+0.12 in late 2025, roughly 8 Russian deaths per Ukrainian death. UCDP codes events from
+reports that may echo each side's claims, so this is not independent of official figures.
+
 ## AI military historian (MCP server)
 
 Jomini includes an [MCP](https://modelcontextprotocol.io) server, so Claude and other AI
@@ -313,6 +351,8 @@ men?" and get answers based on the data instead of guesses.
 | `loss_intensity` | Smoothed loss rate behind a noisy series |
 | `fit_law_to_series` | Fit each side's attrition law to per-period strengths and losses |
 | `breakpoint_distribution` | How much a side loses before it breaks, for a given year |
+| `conflict_events` | Monthly events and deaths for any conflict or country, 1989–2025 (UCDP) |
+| `escalation_model` | Self-exciting (Hawkes) fit: how strongly violence feeds on itself |
 
 Every tool result carries a `provenance` block listing its sources and methods with
 `cite_keys`. Pass those keys to `cite` (or `jomini.catalog.bibtex`) to get BibTeX. Each

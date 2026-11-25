@@ -199,7 +199,59 @@ REFERENCES: dict[str, Reference] = {
             year="2024",
             doi="10.3390/math12060851",
         ),
+        _ref(
+            "hawkes1971",
+            "article",
+            author="Hawkes, Alan G.",
+            title="Spectra of Some Self-Exciting and Mutually Exciting Point Processes",
+            journal="Biometrika",
+            volume="58",
+            number="1",
+            pages="83--90",
+            year="1971",
+        ),
+        _ref(
+            "lewis2012",
+            "article",
+            author="Lewis, Erik and Mohler, George and Brantingham, P. Jeffrey and "
+            "Bertozzi, Andrea L.",
+            title="Self-Exciting Point Process Models of Civilian Deaths in Iraq",
+            journal="Security Journal",
+            volume="25",
+            number="3",
+            pages="244--264",
+            year="2012",
+        ),
+        _ref(
+            "browning2024",
+            "misc",
+            author="Browning, Raiha and Patten, Hamish and Rousseau, Judith and Mengersen, Kerrie",
+            title="Bayesian Spatiotemporal Modelling of Political Violence and Conflict "
+            "Events Using Discrete-Time Hawkes Processes",
+            howpublished="arXiv:2408.14940",
+            year="2024",
+        ),
         # ---------------------------------------------------------------- data
+        _ref(
+            "sundberg2013",
+            "article",
+            author="Sundberg, Ralph and Melander, Erik",
+            title="Introducing the UCDP Georeferenced Event Dataset",
+            journal="Journal of Peace Research",
+            volume="50",
+            number="4",
+            pages="523--532",
+            year="2013",
+        ),
+        _ref(
+            "davies2026",
+            "article",
+            author="Davies, Shawn and Pettersson, Ther{\\'e}se and {\\\"O}berg, Magnus",
+            title="Organized Violence 1989--2025, and Violent Political Protests",
+            journal="Journal of Peace Research",
+            year="2026",
+            doi="10.1093/jopres/xjag046",
+        ),
         _ref(
             "caa1991",
             "techreport",
@@ -344,6 +396,23 @@ DATASETS: dict[str, Dataset] = {
             ),
         ),
         Dataset(
+            "ucdp_ged",
+            "UCDP Georeferenced Event Dataset 26.1",
+            "~418,000 events of organised violence worldwide, 1989-2025: date, place, "
+            "conflict, dyad, deaths per side, civilian deaths, best/low/high estimates",
+            "event",
+            "fetched",
+            "CC BY 4.0",
+            "jomini.data.ucdp_ged()",
+            ("sundberg2013", "davies2026"),
+            (
+                "Coded from news and other reports: coverage varies by place and time.",
+                "Per-side deaths for Russia-Ukraine rely on sources that may echo each "
+                "belligerent's claims; not independent of official figures.",
+                "Events spanning several days are spread evenly over them when aggregated.",
+            ),
+        ),
+        Dataset(
             "ukraine_general_staff",
             "Russian losses claimed by Ukraine's General Staff",
             "Daily since 25 Feb 2022; personnel, tanks, APCs, artillery, drones and more",
@@ -394,6 +463,7 @@ METHODS: dict[str, tuple[str, ...]] = {
     "sindy": ("brunton2016", "sindyukraine2024"),
     "kalman": ("rauch1965",),
     "kursk_fits": ("lucas2004", "bracken1995", "fricker1998"),
+    "hawkes": ("hawkes1971", "lewis2012", "browning2024"),
 }
 
 

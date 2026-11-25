@@ -799,7 +799,7 @@ def _prov_block(keys: list[str]) -> dict[str, Any]:
 
 @server.tool(annotations=_READ_ONLY)
 def effectiveness_trend(
-    source: Literal["kursk", "ukraine_oryx_events", "ukraine_oryx"],
+    source: Literal["kursk", "ukraine_oryx_events", "ukraine_oryx", "ucdp"],
     category: str = "All Types",
     every_days: int = 28,
     level: float = 0.9,
@@ -811,6 +811,8 @@ def effectiveness_trend(
     ratio is the inverse loss-exchange ratio; counting noise plus estimated
     overdispersion). Red is the first side: Germany at Kursk (category casualties,
     tanks_lost, ...), Russia for the Ukraine sources (Oryx classes, e.g. "Tanks").
+    source="ucdp" uses UCDP GED battle deaths per side in the Russia-Ukraine conflict
+    (personnel, not equipment; category is ignored), from 24 Feb 2022.
     Ratio > 1 means red inflicted more losses per loss suffered. Oryx counts documented
     losses only; documentation rates differ by side and time.
     """
@@ -824,6 +826,21 @@ def effectiveness_trend(
         rl = np.diff(red.cumulative[cat], prepend=0.0)
         bl = np.diff(blue.cumulative[cat], prepend=0.0)
         dates = red.dates
+    elif source == "ucdp":
+        from datetime import date as _date
+
+        from jomini import data
+
+        if not 1 <= every_days <= 365:
+            raise ToolError("every_days must be between 1 and 365")
+        ev = data.ucdp_ged().select(conflict="Russia - Ukraine", start=_date(2022, 2, 24))
+        cat = "battle deaths"
+        red = ev.daily("deaths_a", start=_date(2022, 2, 24)).resample(every_days)
+        blue = ev.daily("deaths_b", start=_date(2022, 2, 24)).resample(every_days)
+        rl, bl = red.daily("deaths_a")[1:], blue.daily("deaths_b")[1:]
+        dates = red.dates[1:]
+        sides = ["russia", "ukraine"]
+        note = f"UCDP GED best estimates, {every_days}-day periods from 2022-02-24."
     else:
         if not 1 <= every_days <= 365:
             raise ToolError("every_days must be between 1 and 365")
@@ -855,7 +872,9 @@ def effectiveness_trend(
         "interval_level": level,
         "step_sd_per_period": _round(path.step_sd),
         "overdispersion_sd": _round(path.overdispersion_sd),
-        "provenance": _prov_block([source, "kalman", "lanchester"]),
+        "provenance": _prov_block(
+            [{"ucdp": "ucdp_ged"}.get(source, source), "kalman", "lanchester"]
+        ),
     }
 
 
@@ -967,6 +986,140 @@ def breakpoint_distribution(year: int = 1900) -> dict[str, Any]:
         },
         "note": "Values are fractions of starting strength lost; 1.0 means fight to the end.",
         "provenance": _prov_block(["cdb90", "breakpoints"]),
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+def conflict_events(
+    country: str | None = None,
+    conflict: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    type_of_violence: Literal[1, 2, 3] | None = None,
+    max_months: int = 240,
+) -> dict[str, Any]:
+    """Monthly events and deaths of organised violence from UCDP GED (1989-2025).
+
+    Filter by country or conflict name (case-insensitive substring, e.g. country="Sudan",
+    conflict="Russia - Ukraine"), ISO dates, and type_of_violence (1 state-based,
+    2 non-state, 3 one-sided violence against civilians). Returns per-month event counts,
+    best-estimate deaths, deaths on side A / side B, civilian deaths, plus the main
+    conflicts and dyads matched. The first call downloads ~39 MB and takes a few seconds.
+    """
+    from datetime import date as _date
+
+    from jomini import data
+
+    try:
+        s0 = _date.fromisoformat(start) if start else None
+        e0 = _date.fromisoformat(end) if end else None
+    except ValueError:
+        raise ToolError("start and end must be ISO dates like 2022-02-24") from None
+    if not (country or conflict):
+        raise ToolError("give a country or a conflict name")
+    ev = data.ucdp_ged().select(
+        country=country, conflict=conflict, start=s0, end=e0, type_of_violence=type_of_violence
+    )
+    if not len(ev):
+        raise ToolError("no events match those filters")
+    months: dict[str, dict[str, float]] = {}
+    for value in ("events", "best", "deaths_a", "deaths_b", "deaths_civilians"):
+        series = ev.daily(value, s0, e0)
+        per = series.daily(value)
+        for d, x in zip(series.dates, per, strict=True):
+            key = f"{d.year}-{d.month:02d}"
+            months.setdefault(
+                key,
+                dict.fromkeys(("events", "best", "deaths_a", "deaths_b", "deaths_civilians"), 0.0),
+            )[value] += float(x)
+    rows = [
+        {"month": k, **{kk: round(v, 1) for kk, v in vals.items()}}
+        for k, vals in sorted(months.items())
+    ][-max_months:]
+
+    def top(field: str) -> list[dict[str, Any]]:
+        names, counts = np.unique(ev[field].astype(str), return_counts=True)
+        order = np.argsort(-counts)[:5]
+        return [{"name": str(names[i]), "events": int(counts[i])} for i in order]
+
+    return {
+        "events": len(ev),
+        "deaths_best": round(float(np.nansum(ev["best"]))),
+        "conflicts": top("conflict_name"),
+        "dyads": top("dyad_name"),
+        "months": rows,
+        "note": "deaths_a / deaths_b are deaths on side A / side B of each event's dyad "
+        "(side A is a government in state-based conflicts).",
+        "provenance": _prov_block(["ucdp_ged"]),
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+def escalation_model(
+    country: str | None = None,
+    conflict: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    measure: Literal["events", "deaths"] = "events",
+    knot_days: int = 90,
+) -> dict[str, Any]:
+    """How strongly violence in a conflict feeds on itself: a self-exciting (Hawkes)
+    model fitted to daily UCDP GED counts.
+
+    The branching ratio is the expected number of follow-on events each event triggers
+    (0 = no clustering; near 1 = highly self-sustaining); the half-life is how fast that
+    excitation fades. Two fits are reported: with a smooth spline background rate (slow
+    escalation and lulls are not credited to contagion; in simulations it understates
+    the branching ratio by about 10-20%) and with a constant background (slow trends
+    inflate it, sometimes to ~1; treat as an upper bound). Use the spline fit as the
+    headline. Daily counts are negative binomial (overdispersed).
+    """
+    from datetime import date as _date
+
+    from jomini import data
+    from jomini.escalation import fit_hawkes
+
+    try:
+        s0 = _date.fromisoformat(start) if start else None
+        e0 = _date.fromisoformat(end) if end else None
+    except ValueError:
+        raise ToolError("start and end must be ISO dates like 2022-02-24") from None
+    if not (country or conflict):
+        raise ToolError("give a country or a conflict name")
+    ev = data.ucdp_ged().select(country=country, conflict=conflict, start=s0, end=e0)
+    if not len(ev):
+        raise ToolError("no events match those filters")
+    value = "events" if measure == "events" else "best"
+    series = ev.daily(value, s0, e0)
+    counts = series.daily(value)
+    try:
+        spline = fit_hawkes(counts, baseline="spline", knot_days=knot_days)
+        constant = fit_hawkes(counts, baseline="constant")
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+
+    def report(f: Any) -> dict[str, Any]:
+        return {
+            "branching_ratio": _round(f.branching_ratio, 3),
+            "half_life_days": _round(f.half_life_days, 3),
+            "background_per_day": _round(f.baseline_rate),
+            "dispersion": _round(f.dispersion),
+            "lr_test_p": _round(f.p_value, 3),
+            "aic": _round(f.aic, 6),
+        }
+
+    return {
+        "period": [series.dates[0].isoformat(), series.dates[-1].isoformat()],
+        "days": len(series.dates),
+        "measure": measure,
+        "total": round(float(counts.sum())),
+        "spline_background": report(spline),
+        "constant_background_upper_bound": report(constant),
+        "interpretation": (
+            f"Spline fit: each {measure[:-1]} triggers about {spline.branching_ratio:.2f} "
+            f"more on average, fading with a half-life of {spline.half_life_days:.1f} days."
+        ),
+        "provenance": _prov_block(["ucdp_ged", "hawkes"]),
     }
 
 
