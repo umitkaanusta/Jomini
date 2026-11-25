@@ -521,6 +521,51 @@ def combat_power(battle: int | str | None = None) -> dict[str, Any]:
     return out
 
 
+@server.tool(annotations=_READ_ONLY)
+def salvo_exchange(
+    attacker_units: float,
+    defender_units: float,
+    attacker_offense: float,
+    attacker_defense: float,
+    attacker_staying_power: float,
+    defender_offense: float,
+    defender_defense: float,
+    defender_staying_power: float,
+    salvos: int = 10,
+    first: Literal["both", "attacker", "defender"] = "both",
+) -> dict[str, Any]:
+    """Hughes' salvo model for missile, drone-swarm or naval exchanges fired in volleys.
+
+    Per unit: offense = well-aimed shots fired per salvo, defense = incoming shots
+    intercepted per salvo, staying_power = hits needed to disable it. Units lost in an
+    exchange = max(0, enemy offense - own defense) / staying power. `first` lets one
+    side fire an opening salvo unanswered. Returns units left after each salvo and the
+    fractional exchange ratio (defender's fractional loss / attacker's, >1 favours the
+    attacker) for the opening exchange.
+    """
+    from jomini.modern import SalvoModel, SalvoSide
+
+    try:
+        model = SalvoModel(
+            SalvoSide(attacker_offense, attacker_defense, attacker_staying_power),
+            SalvoSide(defender_offense, defender_defense, defender_staying_power),
+        )
+        if not 1 <= salvos <= 1000:
+            raise ValueError("salvos must be between 1 and 1000")
+        side = {"both": "both", "attacker": "red", "defender": "blue"}[first]
+        result = model.simulate(attacker_units, defender_units, salvos=salvos, first=side)  # type: ignore[arg-type]
+        fer = model.fractional_exchange_ratio(attacker_units, defender_units)
+    except (ValueError, KeyError) as exc:
+        raise ToolError(str(exc)) from None
+    return {
+        "winner": _ROLE.get(result.winner or ""),
+        "salvos_fired": result.salvos,
+        "attacker_units": [_round(x) for x in result.red],
+        "defender_units": [_round(x) for x in result.blue],
+        "fractional_exchange_ratio": _round(fer),
+    }
+
+
 def main() -> None:
     """Entry point for the ``jomini-mcp`` command (stdio transport)."""
     server.run()

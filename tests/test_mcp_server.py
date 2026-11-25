@@ -29,6 +29,7 @@ def test_lists_all_tools_as_read_only() -> None:
         "estimate_law",
         "compare_effectiveness",
         "combat_power",
+        "salvo_exchange",
     }
     assert all(t.annotations and t.annotations.read_only_hint for t in tools)
 
@@ -149,3 +150,21 @@ def test_win_probabilities() -> None:
         ]
         is None
     )
+
+
+def test_salvo_tool() -> None:
+    args = dict(
+        attacker_units=3,
+        defender_units=2,
+        attacker_offense=4,
+        attacker_defense=2,
+        attacker_staying_power=1,
+        defender_offense=4,
+        defender_defense=2,
+        defender_staying_power=1,
+    )
+    out = call("salvo_exchange", **args)
+    assert out["winner"] == "attacker" and out["attacker_units"] == [3, 1]
+    assert call("salvo_exchange", **args, first="defender")["winner"] == "defender"
+    with pytest.raises(ToolError):
+        call("salvo_exchange", **{**args, "attacker_staying_power": 0})
