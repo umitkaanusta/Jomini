@@ -93,6 +93,31 @@ The data is the cleaned, open edition maintained by Jeffrey Arnold at
 [jrnold/CDB90](https://github.com/jrnold/CDB90) (CC0, release 10.8.0), built from the
 original CAA/HERO data. `scripts/build_cdb90.py` rebuilds the bundled copy from it.
 
+## Research: which law do real battles follow?
+
+You can't tell the laws apart from one battle, since each can be fitted exactly to a
+single pair of losses. You can tell them apart across many battles. `jomini.research`
+estimates the law exponent `e = p − q + 1` (2 = square, 1 = linear, 0 = logarithmic). It
+picks the `e` at which a side's fighting effectiveness stops depending on how many troops
+it brought, following Helmbold's criterion.
+
+```python
+from jomini import cdb90
+from jomini.research import effectiveness_table, estimate_exponent
+
+print(estimate_exponent(cdb90.battles()))
+# e = 0.74 (95% CI 0.57 to 0.89, n = 646); nearest: linear law
+
+ww2 = cdb90.search(war="world war ii")
+estimate_exponent(ww2).excludes("square")  # True
+
+effectiveness_table(exponent=1.0)  # per-battle attacker/defender effectiveness (pandas)
+```
+
+Across CDB90, the square law, the textbook default, is clearly rejected. Historical
+battles fall between the linear and logarithmic laws. You can also pass
+`(red_start, red_end, blue_start, blue_end)` tuples from your own data.
+
 ## The models
 
 Every model is a case of Bracken's generalised Lanchester law:
