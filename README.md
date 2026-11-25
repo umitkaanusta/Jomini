@@ -358,10 +358,10 @@ finite magazine:
 ```python
 from jomini.airdefense import generic_defense
 
-defense = generic_defense()            # illustrative: interceptors, mobile guns, missiles
+defense = generic_defense()  # illustrative: interceptors, mobile guns, missiles
 print(defense.raid(100, attacker_unit_cost=50_000))
 sizes, leak_share, elasticity = defense.leakage_curve([25, 50, 100, 200, 400])
-camp = defense.campaign([150] * 10, restock={"missiles": 3})   # magazine depletion
+camp = defense.campaign([150] * 10, restock={"missiles": 3})  # magazine depletion
 ```
 
 **Proposition.** If each attacker's chance of being shot down can only fall as more
