@@ -114,9 +114,41 @@ estimate_exponent(ww2).excludes("square")  # True
 effectiveness_table(exponent=1.0)  # per-battle attacker/defender effectiveness (pandas)
 ```
 
-Across CDB90, the square law, the textbook default, is clearly rejected. Historical
-battles fall between the linear and logarithmic laws. You can also pass
-`(red_start, red_end, blue_start, blue_end)` tuples from your own data.
+Across CDB90, the square law, the textbook default, is clearly rejected. You can also
+pass `(red_start, red_end, blue_start, blue_end)` tuples from your own data.
+
+### Separating quality from numbers
+
+In CDB90 the side with more troops tends to have worse ones, which drags the plain estimate
+down. `adjust_for` controls for CDB90's ratings of each side's advantages (leadership,
+training, surprise, air superiority and so on). Effectiveness then only has to be
+independent of numbers *at equal quality*:
+
+```python
+estimate_exponent(cdb90.battles(), adjust_for="quality")
+# e = 0.93 (95% CI 0.81 to 1.06, n = 618); nearest: linear law
+```
+
+Once quality is accounted for, historical battles follow the linear law. The combat power
+model estimates how much each factor multiplied a side's effectiveness:
+
+```python
+from jomini.research import combat_power_model
+
+print(combat_power_model())
+# Combat power model (e = 0.94, n = 618, R² = 0.37); attacker effectiveness multipliers:
+#   * leadership             x 1.96  (95% CI 1.71 to 2.25)
+#   * logistics              x 0.60  (95% CI 0.47 to 0.76)
+#   * training               x 1.38  (95% CI 1.18 to 1.61)
+#   * initiative             x 1.34  (95% CI 1.12 to 1.60)
+#   * technology             x 1.61  (95% CI 1.13 to 2.28)
+#   ...
+combat_power_model().predict({"leadership": 1, "surprise": 2}, defender_posture="fortified")
+```
+
+The ratings were assigned by analysts who already knew the outcome, so read the multipliers
+as associations, not causes. The negative logistics effect is real in the data but
+unexplained.
 
 ## AI military historian (MCP server)
 
@@ -134,6 +166,7 @@ men?" and get answers based on the data instead of guesses.
 | `simulate_battle` | Simulate a hypothetical battle from scratch |
 | `estimate_law` | Find which law a group of battles follows (by war, state or era) |
 | `compare_effectiveness` | How deadly a state's soldiers were against their enemies, battle by battle |
+| `combat_power` | Which factors (leadership, surprise, posture, ...) made soldiers deadlier, overall or for one battle |
 
 **Claude Code:**
 

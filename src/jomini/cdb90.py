@@ -66,6 +66,38 @@ class Side:
 
 
 @dataclass(frozen=True, slots=True)
+class Advantages:
+    """Analysts' ratings of the **attacker's** relative advantage in each factor.
+
+    Integers, usually -1 to +1 (some run -3 to +3): positive favours the attacker,
+    negative the defender, 0 means neither, ``None`` means not rated. They were
+    assigned by HERO analysts *after* the battles, with the outcome known.
+    """
+
+    surprise: int | None
+    air_superiority: int | None
+    leadership: int | None
+    training: int | None
+    morale: int | None
+    logistics: int | None
+    momentum: int | None
+    intelligence: int | None
+    technology: int | None
+    initiative: int | None
+
+    def as_dict(self) -> dict[str, int | None]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+    @property
+    def complete(self) -> bool:
+        return all(v is not None for v in self.as_dict().values())
+
+
+ADVANTAGE_FACTORS: tuple[str, ...] = tuple(f.name for f in fields(Advantages))
+Posture = Literal["hasty", "prepared", "fortified", "delay", "withdrawal"]
+
+
+@dataclass(frozen=True, slots=True)
 class HistoricalBattle:
     """A battle from CDB90."""
 
@@ -89,6 +121,9 @@ class HistoricalBattle:
     defender: Side
     wikipedia_title: str | None
     wikidata_id: str | None
+    defender_posture: Posture | None
+    """Defender's primary posture: hasty, prepared or fortified defence, delay, withdrawal."""
+    advantages: Advantages
 
     @property
     def year(self) -> int:
@@ -229,6 +264,10 @@ def battles() -> tuple[HistoricalBattle, ...]:
                 defender=_side(row, "defender"),
                 wikipedia_title=_str(row["wikipedia_title"]),
                 wikidata_id=_str(row["wikidata_id"]),
+                defender_posture=_str(row["defender_posture"]),  # type: ignore[arg-type]
+                advantages=Advantages(
+                    **{name: _int(row[f"adv_{name}"]) for name in ADVANTAGE_FACTORS}
+                ),
             )
         )
     return tuple(out)
@@ -343,7 +382,7 @@ def to_pandas() -> Any:
         row: dict[str, Any] = {}
         for f in fields(b):
             value = getattr(b, f.name)
-            if isinstance(value, Side):
+            if isinstance(value, (Side, Advantages)):
                 for sf in fields(value):
                     v = getattr(value, sf.name)
                     row[f"{f.name}_{sf.name}"] = "; ".join(v) if isinstance(v, tuple) else v

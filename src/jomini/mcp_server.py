@@ -19,7 +19,7 @@ except ImportError as exc:  # pragma: no cover
 from jomini import Battle, GeneralLaw, LinearLaw, LogarithmicLaw, SquareLaw, cdb90
 from jomini.cdb90 import HistoricalBattle, Side
 from jomini.models import LanchesterModel
-from jomini.research import estimate_exponent, relative_effectiveness
+from jomini.research import combat_power_model, estimate_exponent, relative_effectiveness
 
 LawName = Literal["square", "linear", "logarithmic"]
 _LAWS: dict[str, tuple[type[LanchesterModel], float]] = {
@@ -40,9 +40,12 @@ Conventions:
 - Time is in days of active combat. rho is the attacker's per-day effectiveness and beta
   the defender's. "effectiveness_ratio" = rho/beta: how many times as deadly each
   attacking soldier was as each defending soldier.
-- Across CDB90, battles follow something between the linear and logarithmic laws (law
-  exponent ~0.74). The square law, the textbook default, fits history poorly. Prefer
-  law="linear" unless you have a reason not to, and say which law you used.
+- Across CDB90, once soldier quality is held fixed, battles follow the linear law (law
+  exponent ~0.93, 95% CI 0.81-1.06). The square law, the textbook default, fits history
+  poorly. Prefer law="linear" unless you have a reason not to, and say which law you used.
+- combat_power explains effectiveness with analysts' ratings (leadership, training,
+  surprise, ...). Those ratings were assigned with the outcome known: treat the
+  multipliers as associations, not causes.
 
 Be honest about limits: figures are historical estimates, Lanchester models capture
 attrition only (not manoeuvre, morale collapse or command), and counterfactuals are
@@ -178,6 +181,8 @@ def get_battle(battle: int | str, include_narrative: bool = True) -> dict[str, A
         "wikipedia_url": b.wikipedia_url,
         "wikidata_id": b.wikidata_id,
         "fittable": b.fittable,
+        "defender_posture": b.defender_posture,
+        "attacker_advantages": b.advantages.as_dict(),
     }
     if include_narrative:
         out["narrative"] = b.narrative
@@ -355,19 +360,25 @@ def estimate_law(
     year_from: int | None = None,
     year_to: int | None = None,
     query: str | None = None,
+    adjust_for_quality: bool = True,
 ) -> dict[str, Any]:
     """Estimate which Lanchester law a set of historical battles follows.
 
     Filters CDB90 like search_battles (all battles if no filters) and estimates the
     exponent e = p - q + 1 (2 = square, 1 = linear, 0 = logarithmic) as the value at which
     fighting effectiveness is independent of force ratio (Helmbold's criterion), with a
-    95% bootstrap confidence interval. Needs at least 10 battles with complete data.
+    95% bootstrap confidence interval. With adjust_for_quality (default), effectiveness
+    only has to be independent of force ratio after accounting for the analysts' quality
+    ratings, so that a side's numbers aren't credited with its quality. Needs at least 10
+    battles with complete data (more when adjusting).
     """
     pool = cdb90.search(
         query, war=war, actor=actor, year_from=year_from, year_to=year_to, fittable=True
     )
     try:
-        est = estimate_exponent(pool, n_boot=500)
+        est = estimate_exponent(
+            pool, n_boot=500, adjust_for="quality" if adjust_for_quality else None
+        )
     except ValueError as exc:
         raise ToolError(f"{exc} (matched {len(pool)} battles with complete data)") from None
     return {
@@ -376,6 +387,7 @@ def estimate_law(
         "n_battles": est.n,
         "nearest_law": est.nearest_law,
         "excluded_laws": [law for law in _LAWS if est.excludes(law)],
+        "adjusted_for_quality": adjust_for_quality,
         "summary": str(est),
     }
 
@@ -439,6 +451,46 @@ def compare_effectiveness(
         "most_effective": [row(*x) for x in ranked[::-1][:5]],
         "least_effective": [row(*x) for x in ranked[:5]],
     }
+
+
+@server.tool(annotations=_READ_ONLY)
+def combat_power(battle: int | str | None = None) -> dict[str, Any]:
+    """Which quality factors made soldiers deadlier, across all of CDB90?
+
+    Returns multipliers on the attacker's per-soldier effectiveness for one point of
+    advantage in leadership, training, surprise, air superiority, technology and other
+    analyst-rated factors, plus the defender's posture (relative to a hasty defence),
+    fitted under the quality-adjusted law. With `battle`, also compares the effectiveness
+    the factors predict for that battle with what actually happened. The ratings were
+    assigned with the outcome known, so these are associations, not causal effects.
+    """
+    model = combat_power_model()
+    out: dict[str, Any] = {
+        "exponent": _round(model.exponent, 3),
+        "n_battles": model.n,
+        "r_squared": _round(model.r_squared, 3),
+        "baseline_effectiveness_ratio": _round(model.baseline),
+        "multipliers": {
+            name: {
+                "per_point": _round(m.estimate),
+                "ci_95": [_round(m.ci_low), _round(m.ci_high)],
+                "significant": m.significant,
+            }
+            for name, m in sorted(model.multipliers.items(), key=lambda kv: -abs(kv[1].t))
+        },
+    }
+    if battle is not None:
+        b = _lookup(battle)
+        predicted = model.predict_battle(b)
+        actual = relative_effectiveness(b, model.exponent) if b.fittable else None
+        out["battle"] = {
+            **_summary(b),
+            "defender_posture": b.defender_posture,
+            "attacker_advantages": b.advantages.as_dict(),
+            "predicted_effectiveness_ratio": _round(predicted),
+            "actual_effectiveness_ratio": _round(actual),
+        }
+    return out
 
 
 def main() -> None:

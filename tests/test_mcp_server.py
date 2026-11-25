@@ -28,6 +28,7 @@ def test_lists_all_tools_as_read_only() -> None:
         "simulate_battle",
         "estimate_law",
         "compare_effectiveness",
+        "combat_power",
     }
     assert all(t.annotations and t.annotations.read_only_hint for t in tools)
 
@@ -102,9 +103,25 @@ def test_simulate_battle() -> None:
 def test_estimate_law_and_effectiveness() -> None:
     law = call("estimate_law", war="world war ii")
     assert "square" in law["excluded_laws"] and law["n_battles"] > 100
-    with pytest.raises(ToolError, match="at least 10"):
+    with pytest.raises(ToolError, match="need at least"):
         call("estimate_law", query="waterloo")
     eff = call("compare_effectiveness", actor="Germany", opponent="USSR")
     assert eff["n_battles"] > 10 and eff["geometric_mean_ratio"] > 1
     with pytest.raises(ToolError):
         call("compare_effectiveness", actor="Atlantis")
+
+
+def test_combat_power_tool() -> None:
+    out = call("combat_power", battle="Waterloo")
+    assert out["multipliers"]["leadership"]["significant"]
+    assert next(iter(out["multipliers"])) == "leadership"  # strongest factor first
+    assert out["battle"]["attacker_advantages"]["surprise"] == -2
+    assert out["battle"]["predicted_effectiveness_ratio"] > 0
+    assert call("get_battle", battle=145)["defender_posture"] == "hasty"
+
+
+def test_estimate_law_quality_adjustment() -> None:
+    adjusted = call("estimate_law")
+    plain = call("estimate_law", adjust_for_quality=False)
+    assert adjusted["adjusted_for_quality"] and not plain["adjusted_for_quality"]
+    assert adjusted["exponent"] > plain["exponent"]
