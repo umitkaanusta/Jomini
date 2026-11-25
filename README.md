@@ -118,6 +118,42 @@ Across CDB90, the square law, the textbook default, is clearly rejected. Histori
 battles fall between the linear and logarithmic laws. You can also pass
 `(red_start, red_end, blue_start, blue_end)` tuples from your own data.
 
+## AI military historian (MCP server)
+
+Jomini includes an [MCP](https://modelcontextprotocol.io) server, so Claude and other AI
+agents can work with the battle data and models directly. Ask "How effective was the
+German army against the Soviets?" or "Would Napoleon have won Waterloo with 30% more
+men?" and get answers based on the data instead of guesses.
+
+| Tool | What it does |
+|---|---|
+| `search_battles` | Find battles by name, war, state, commander, year or outcome |
+| `get_battle` | Full record of one battle, including the narrative from the original study |
+| `fit_battle` | Fit a law to a battle and report each side's relative effectiveness |
+| `what_if` | Re-fight a battle with more or fewer troops, or better or worse ones, and compare with history |
+| `simulate_battle` | Simulate a hypothetical battle from scratch |
+| `estimate_law` | Find which law a group of battles follows (by war, state or era) |
+| `compare_effectiveness` | How deadly a state's soldiers were against their enemies, battle by battle |
+
+**Claude Code:**
+
+```bash
+claude mcp add jomini -- uvx --from "jomini[mcp]" jomini-mcp
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "jomini": { "command": "uvx", "args": ["--from", "jomini[mcp]", "jomini-mcp"] }
+  }
+}
+```
+
+Until 1.0 is on PyPI, install from GitHub instead:
+`uvx --from "jomini[mcp] @ git+https://github.com/umitkaanusta/Jomini" jomini-mcp`.
+
 ## The models
 
 Every model is a case of Bracken's generalised Lanchester law:
