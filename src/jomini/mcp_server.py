@@ -997,12 +997,16 @@ def conflict_events(
     end: str | None = None,
     type_of_violence: Literal[1, 2, 3] | None = None,
     max_months: int = 240,
+    dataset: Literal["ged", "candidate"] = "ged",
 ) -> dict[str, Any]:
     """Monthly events and deaths of organised violence from UCDP GED (1989-2025).
 
     Filter by country or conflict name (case-insensitive substring, e.g. country="Sudan",
     conflict="Russia - Ukraine"), ISO dates, and type_of_violence (1 state-based,
-    2 non-state, 3 one-sided violence against civilians). Returns per-month event counts,
+    2 non-state, 3 one-sided violence against civilians). dataset="candidate" uses UCDP's
+    provisional 2026 events (Jan-Sep 2026, incl. the 2026 Iran war: conflict="Iran"); its
+    per-side deaths can be badly incomplete, so check both sides before comparing.
+    Returns per-month event counts,
     best-estimate deaths, deaths on side A / side B, civilian deaths, plus the main
     conflicts and dyads matched. The first call downloads ~39 MB and takes a few seconds.
     """
@@ -1017,7 +1021,7 @@ def conflict_events(
         raise ToolError("start and end must be ISO dates like 2022-02-24") from None
     if not (country or conflict):
         raise ToolError("give a country or a conflict name")
-    ev = data.ucdp_ged().select(
+    ev = (data.ucdp_ged() if dataset == "ged" else data.ucdp_candidate()).select(
         country=country, conflict=conflict, start=s0, end=e0, type_of_violence=type_of_violence
     )
     if not len(ev):
@@ -1050,7 +1054,7 @@ def conflict_events(
         "months": rows,
         "note": "deaths_a / deaths_b are deaths on side A / side B of each event's dyad "
         "(side A is a government in state-based conflicts).",
-        "provenance": _prov_block(["ucdp_ged"]),
+        "provenance": _prov_block(["ucdp_ged" if dataset == "ged" else "ucdp_candidate"]),
     }
 
 
@@ -1062,6 +1066,7 @@ def escalation_model(
     end: str | None = None,
     measure: Literal["events", "deaths"] = "events",
     knot_days: int = 90,
+    dataset: Literal["ged", "candidate"] = "ged",
 ) -> dict[str, Any]:
     """How strongly violence in a conflict feeds on itself: a self-exciting (Hawkes)
     model fitted to daily UCDP GED counts.
@@ -1086,7 +1091,9 @@ def escalation_model(
         raise ToolError("start and end must be ISO dates like 2022-02-24") from None
     if not (country or conflict):
         raise ToolError("give a country or a conflict name")
-    ev = data.ucdp_ged().select(country=country, conflict=conflict, start=s0, end=e0)
+    ev = (data.ucdp_ged() if dataset == "ged" else data.ucdp_candidate()).select(
+        country=country, conflict=conflict, start=s0, end=e0
+    )
     if not len(ev):
         raise ToolError("no events match those filters")
     value = "events" if measure == "events" else "best"
@@ -1119,7 +1126,7 @@ def escalation_model(
             f"Spline fit: each {measure[:-1]} triggers about {spline.branching_ratio:.2f} "
             f"more on average, fading with a half-life of {spline.half_life_days:.1f} days."
         ),
-        "provenance": _prov_block(["ucdp_ged", "hawkes"]),
+        "provenance": _prov_block(["ucdp_ged" if dataset == "ged" else "ucdp_candidate", "hawkes"]),
     }
 
 
