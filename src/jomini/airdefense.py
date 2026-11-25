@@ -58,7 +58,8 @@ class Layer:
     """One band of air defence, between ``inner`` and ``outer`` km from the target.
 
     :param pk: Kill probability per shot.
-    :param fire_rate: Maximum shots per hour (crews, launchers, guidance channels).
+    :param fire_rate: Maximum shots per hour (crews, launchers, guidance channels);
+        ``inf`` for a layer that never saturates.
     :param engage_rate: Shots per hour at each attacker when the layer isn't saturated.
     :param magazine: Shots available (``inf`` for guns and EW).
     :param cost_per_shot: For cost exchange.
@@ -316,7 +317,8 @@ def _simulate(
             if present <= 1e-12 or left[i] <= 0:
                 continue
             f, e = lay.fire_rate * scale[i], lay.engage_rate * scale[i]
-            fired = min(f * e * present / (f + e * present) * dt, left[i])
+            rate = e * present if math.isinf(f) else f * e * present / (f + e * present)
+            fired = min(rate * dt, left[i])
             killed = min(lay.pk * fired, 0.999 * present)
             u[mask] *= 1 - killed / present
             shots[i] += fired
@@ -375,6 +377,35 @@ def generic_defense(*, magazine_scale: float = 1.0) -> AirDefense:
             ),
         )
     )
+
+
+def ukraine_defense() -> AirDefense:
+    """The three-layer defence fitted to Ukraine's nightly Shahed reports, Sep 2024 to
+    Nov 2026 (``scripts/fit_ukraine_defense.py``).
+
+    Starting from :func:`generic_defense`, the fit frees what the data can identify:
+    a common scale on every layer's ``pk`` (x1.05) and ``surge`` (0.19, so each drone
+    is engaged about 14% faster when the raid doubles). A fit with finite capacity ran
+    capacity to the top of its range, so capacity is ``inf``: on a typical night no
+    layer saturates. Magazines are unlimited within a night. Across seven raid-size
+    groups the model misses the observed leak share by 1.5 percentage points on
+    average; it overstates leakage on the smallest raids (24% vs 17%).
+
+    The layer ranges, costs and the split of lethality between layers are not
+    identified by these data (they only report launched and stopped per night) and stay
+    at the generic values.
+    """
+    surge = 0.19
+    return AirDefense(
+        (
+            Layer("interceptors", 300, 150, pk=0.63, fire_rate=math.inf, engage_rate=2.0,
+                  cost_per_shot=5_000, surge=surge),
+            Layer("mobile guns", 150, 40, pk=0.32, fire_rate=math.inf, engage_rate=2.0,
+                  cost_per_shot=500, surge=surge),
+            Layer("missiles", 40, 0, pk=0.90, fire_rate=math.inf, engage_rate=2.0,
+                  cost_per_shot=500_000, surge=surge),
+        )
+    )  # fmt: skip
 
 
 # --------------------------------------------------------------------- statistics
