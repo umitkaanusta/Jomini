@@ -7,7 +7,13 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from jomini import data
-from jomini.airdefense import AirDefense, Layer, generic_defense, saturation_test
+from jomini.airdefense import (
+    AirDefense,
+    Layer,
+    generic_defense,
+    saturation_test,
+    ukraine_defense,
+)
 
 
 def _one_layer(**kw: float) -> AirDefense:
@@ -50,6 +56,17 @@ def test_surge_produces_economies_of_scale() -> None:
     assert np.all(np.diff(frac) > 0) and np.all(el > 1)
     _, frac, el = generic_defense().with_surge(1.0).leakage_curve([20, 40, 80, 160])
     assert np.all(np.diff(frac) < 0) and np.all(el < 1)
+
+
+def test_ukraine_fit_has_economies_of_scale() -> None:
+    _, frac, el = ukraine_defense().leakage_curve([30, 60, 125, 250, 500])
+    assert np.all(np.diff(frac) < 0) and np.all(el < 1)
+    assert 0.12 < ukraine_defense().raid(125).leak_fraction < 0.19
+    # Unlimited capacity: engagement stays linear in the number of drones present.
+    no_surge = ukraine_defense().with_surge(0.0)
+    assert no_surge.raid(50).leak_fraction == pytest.approx(
+        no_surge.raid(400).leak_fraction, rel=0.02
+    )
 
 
 def test_campaign_depletes_magazines() -> None:

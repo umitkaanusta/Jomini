@@ -343,13 +343,17 @@ def test_conflict_tools_with_stubbed_ged(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_air_defense_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    raid = call("air_defense_raid", raid_sizes=[50, 100, 200], nights=5)
+    raid = call("air_defense_raid", raid_sizes=[50, 100, 200], defense="generic", nights=5)
     assert [r["launched"] for r in raid["raids"]] == [50, 100, 200]
     assert all(e > 1 for e in raid["leak_elasticity"])
     assert len(raid["campaign"]["leak_fraction_by_night"]) == 5
     assert "randow2026" in raid["provenance"]["cite_keys"]
-    surged = call("air_defense_raid", raid_sizes=[50, 200], surge=1.0)
+    surged = call("air_defense_raid", raid_sizes=[50, 200], defense="generic", surge=1.0)
     assert surged["raids"][1]["leak_fraction"] < surged["raids"][0]["leak_fraction"]
+    fitted = call("air_defense_raid", raid_sizes=[60, 125, 500])
+    assert fitted["defense"] == "ukraine" and fitted["surge"] == pytest.approx(0.19)
+    shares = [r["leak_fraction"] for r in fitted["raids"]]
+    assert shares[0] > shares[1] > shares[2] and 0.1 < shares[1] < 0.2
     with pytest.raises(ToolError):
         call("air_defense_raid", raid_sizes=[])
 

@@ -82,9 +82,9 @@ Research workflow:
   war in Ukraine (Ukrainian General Staff claims; Oryx visually confirmed losses).
 - Time series: get_loss_series, effectiveness_trend (Kalman-smoothed relative
   effectiveness), loss_intensity (smoothed loss rate), fit_law_to_series.
-- Air defence: air_defense_raid simulates drone raids against a layered defence
-  (saturation, magazines, cost exchange); air_defense_saturation_test checks Ukraine's
-  nightly Air Force reports for saturation.
+- Air defence: air_defense_raid simulates drone raids against a layered defence fitted
+  to Ukraine's nightly reports (or a generic fixed-capacity one: saturation, magazines,
+  cost exchange); air_defense_saturation_test checks those reports for saturation.
 - Every result carries a "provenance" block; use cite with its cite_keys for BibTeX.
   Report uncertainty (intervals, standard errors) alongside point estimates, and pass on
   the dataset caveats (e.g. Oryx counts only documented losses; General Staff figures are
@@ -1137,38 +1137,50 @@ def escalation_model(
 @_provenance("air_defense")
 def air_defense_raid(
     raid_sizes: list[float],
-    surge: float = 0.0,
+    defense: Literal["ukraine", "generic"] = "ukraine",
+    surge: float | None = None,
     magazine_scale: float = 1.0,
     launch_window_hours: float = 1.0,
     attacker_unit_cost: float = 50_000,
     nights: int = 1,
 ) -> dict[str, Any]:
-    """Simulate drone raids against an illustrative three-layer air defence (interceptor
-    drones/aircraft 150-300 km out, mobile guns 40-150 km, missiles inside 40 km with a
-    finite, expensive magazine). A spatial Lanchester model: the raid flies in and
-    spreads out; each layer's shots saturate (Holling type II) and draw down magazines.
+    """Simulate drone raids against a three-layer air defence (interceptor
+    drones/aircraft 150-300 km out, mobile guns 40-150 km, missiles inside 40 km). A
+    spatial Lanchester model: the raid flies in and spreads out; each layer's shots
+    saturate (Holling type II) and draw down magazines.
+
+    ``defense="ukraine"`` (default) uses the version fitted to Ukraine's nightly Shahed
+    reports since Sep 2024: unlimited capacity, surge 0.19, about 15% of a typical
+    125-drone raid gets through. ``defense="generic"`` uses round placeholder numbers
+    with fixed capacity and finite magazines (shows saturation and depletion).
 
     Returns leak fraction, kills per layer and cost exchange for each raid size, and
     the elasticity of leakers with respect to raid size (above 1 = saturation). With
     ``surge`` > 0 the defence's capacity grows with raid size as
     (size/100)**surge, modelling forces moved in on warning. With ``nights`` > 1 the
     largest raid size repeats nightly against magazines restocked at 5% a night, to
-    show magazine depletion. Layer numbers are generic placeholders, not any real
-    order of battle: use for mechanisms, not forecasts.
+    show magazine depletion. Layer ranges and costs are placeholders, not any real
+    order of battle; the Ukraine fit only pins down overall lethality and surge.
     """
-    from jomini.airdefense import generic_defense
+    from jomini.airdefense import generic_defense, ukraine_defense
 
     if not raid_sizes or any(s <= 0 or s > 5000 for s in raid_sizes):
         raise ToolError("raid_sizes must be 1 to 5000 attackers each")
-    if not 0 <= surge <= 3 or not 0.05 <= magazine_scale <= 20:
+    if (surge is not None and not 0 <= surge <= 3) or not 0.05 <= magazine_scale <= 20:
         raise ToolError("surge must be in [0, 3] and magazine_scale in [0.05, 20]")
     if not 1 <= nights <= 60:
         raise ToolError("nights must be 1 to 60")
-    defense = generic_defense(magazine_scale=magazine_scale).with_surge(surge)
+    model = (
+        ukraine_defense()
+        if defense == "ukraine"
+        else generic_defense(magazine_scale=magazine_scale)
+    )
+    if surge is not None:
+        model = model.with_surge(surge)
     sizes = sorted(set(raid_sizes))
     raids = []
     for size in sizes:
-        r = defense.raid(size, launch_window=launch_window_hours,
+        r = model.raid(size, launch_window=launch_window_hours,
                          attacker_unit_cost=attacker_unit_cost)  # fmt: skip
         raids.append(
             {
@@ -1187,14 +1199,14 @@ def air_defense_raid(
                 "cost_exchange": _round(r.cost_exchange, 3),
             }
         )
-    out: dict[str, Any] = {"raids": raids, "surge": surge}
+    out: dict[str, Any] = {"defense": defense, "raids": raids, "surge": model.layers[0].surge}
     if len(sizes) > 1:
-        _, _, el = defense.leakage_curve(sizes, launch_window=launch_window_hours)
+        _, _, el = model.leakage_curve(sizes, launch_window=launch_window_hours)
         out["leak_elasticity"] = [_round(float(e), 3) for e in el]
     if nights > 1:
-        layers = {x.name: x.magazine for x in defense.layers}
+        layers = {x.name: x.magazine for x in model.layers}
         restock = {k: 0.05 * v for k, v in layers.items() if math.isfinite(v)}
-        camp = defense.campaign([sizes[-1]] * nights, restock=restock,
+        camp = model.campaign([sizes[-1]] * nights, restock=restock,
                                 launch_window=launch_window_hours)  # fmt: skip
         out["campaign"] = {
             "raid_size": sizes[-1],
