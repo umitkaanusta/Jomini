@@ -20,15 +20,22 @@ Logarithmic         0    1
 from __future__ import annotations
 
 import math
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from scipy.integrate import solve_ivp
 
 from jomini.battle import Battle
+from jomini.fitting import estimate
 from jomini.result import BattleResult, Outcome, Side
+
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:  # pragma: no cover
+    from typing_extensions import Self
 
 # Integration horizon (in units of the battle's characteristic time) used when
 # no t_max is given. Large enough for slow-decaying laws to reach min_strength.
@@ -72,6 +79,36 @@ class LanchesterModel(ABC):
         p, q = self.exponents
         red, blue = max(red, 0.0), max(blue, 0.0)
         return self.beta * blue**p * red**q, self.rho * red**p * blue**q
+
+    @classmethod
+    def fit(
+        cls,
+        battle: Battle,
+        *,
+        t: float | ArrayLike,
+        red: float | ArrayLike,
+        blue: float | ArrayLike,
+    ) -> Self:
+        """Estimate ``rho`` and ``beta`` from observed strengths.
+
+        Pass the remaining strength of each side at one or more times after the
+        battle began. With a single observation, e.g. the battle's final
+        outcome, the fit is exact::
+
+            # Cerignola (1503): 6,300 Spanish lost ~500, 9,000 French lost ~4,000
+            SquareLaw.fit(Battle(6_300, 9_000), t=1, red=5_800, blue=5_000)
+
+        The time unit is yours to choose (hours, days, "one battle").
+        """
+        p, q = cls._fixed_exponents()
+        rho, beta, _, _ = estimate(battle, t, red, blue, p=p, q=q)
+        return cls(rho=rho, beta=beta)
+
+    @classmethod
+    def _fixed_exponents(cls) -> tuple[float, float]:
+        # Exponents are a property of the law, not the instance: read them off a
+        # throwaway instance with placeholder coefficients.
+        return cls(rho=1.0, beta=1.0).exponents
 
     def simulate(
         self,
@@ -243,3 +280,27 @@ class GeneralLaw(LanchesterModel):
     @property
     def exponents(self) -> tuple[float, float]:
         return float(self.p), float(self.q)
+
+    @classmethod
+    def fit(
+        cls,
+        battle: Battle,
+        *,
+        t: float | ArrayLike,
+        red: float | ArrayLike,
+        blue: float | ArrayLike,
+        p: float | None = None,
+        q: float | None = None,
+    ) -> Self:
+        """Estimate ``rho``, ``beta`` and any exponent left as ``None``.
+
+        Fitting the exponents needs observations at two or more times (four
+        unknowns, two numbers per observation). Fix ``p`` and/or ``q`` to fit
+        from less data.
+        """
+        if p is not None:
+            _check_exponent("p", p)
+        if q is not None:
+            _check_exponent("q", q)
+        rho, beta, p_fit, q_fit = estimate(battle, t, red, blue, p=p, q=q)
+        return cls(rho=rho, beta=beta, p=p_fit, q=q_fit)

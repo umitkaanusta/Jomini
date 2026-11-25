@@ -43,6 +43,27 @@ model.simulate(battle, breakpoint=(0.5, 0.2))  # (red, blue)
 model.simulate(battle, t_max=20)  # stop the clock at t = 20
 ```
 
+## Fitting a model to a real battle
+
+Coefficients are hard to guess, so estimate them from what happened instead. Pass each
+side's remaining strength at one or more times:
+
+```python
+from jomini import Battle, GeneralLaw, SquareLaw
+
+# Cerignola (1503): 6,300 Spanish (red) lost ~500, 9,000 French (blue) lost ~4,000
+cerignola = Battle(red=6_300, blue=9_000)
+model = SquareLaw.fit(cerignola, t=1, red=5_800, blue=5_000)  # t=1: "one battle"
+model.rho / model.beta  # ~9.3: each Spanish soldier was ~9x as effective
+
+# With a time series you can let the data pick the law, too
+GeneralLaw.fit(battle, t=[1, 2, 3, 4], red=[...], blue=[...])  # fits rho, beta, p, q
+```
+
+A single observation determines `rho` and `beta` exactly. Fitting `p` and `q` as well needs
+observations at two or more times, plus enough attrition for the curves to bend. If losses
+are small, the laws all look like straight lines and the exponents can't be told apart.
+
 ## The models
 
 Every model is a case of Bracken's generalised Lanchester law:
