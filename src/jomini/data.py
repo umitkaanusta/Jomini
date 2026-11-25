@@ -214,6 +214,7 @@ _GS_BASE = (
 )
 _ORYX_URL = "https://raw.githubusercontent.com/scarnecchia/oryx_data/main/daily_count.csv"
 _ORYX_EVENTS_URL = "https://raw.githubusercontent.com/leedrake5/Russia-Ukraine/main/Apps/shinyApp/data/daily_frame.csv"
+_UCDP_GED_URL = "https://ucdp.uu.se/downloads/ged/ged261-csv.zip"
 Fetcher = Callable[[str], bytes]
 
 
@@ -252,6 +253,9 @@ class LossSeries:
     dates: tuple[date, ...]
     cumulative: dict[str, NDArray[np.float64]]
     source: str
+    starts_at_zero: bool = False
+    """True when the cumulative count began at zero on the first date (e.g. counts built
+    from individual events), so the first period's losses are the first value itself."""
 
     @property
     def days(self) -> NDArray[np.float64]:
@@ -263,7 +267,7 @@ class LossSeries:
     def daily(self, category: str) -> NDArray[np.float64]:
         """New losses per observation interval (first difference of the cumulative)."""
         c = self.cumulative[category]
-        out: NDArray[np.float64] = np.diff(c, prepend=c[0])
+        out: NDArray[np.float64] = np.diff(c, prepend=0.0 if self.starts_at_zero else c[0])
         return out
 
     def resample(
@@ -285,7 +289,7 @@ class LossSeries:
         cumulative = {
             k: np.where(idx >= 0, v[np.clip(idx, 0, None)], 0.0) for k, v in self.cumulative.items()
         }
-        return LossSeries(dates, cumulative, self.source)
+        return LossSeries(dates, cumulative, self.source, self.starts_at_zero)
 
     def to_pandas(self) -> Any:
         import pandas as pd
@@ -388,7 +392,146 @@ def ukraine_oryx_events(
         if cls != "NA":
             counts.setdefault(cls, np.zeros(n))[i] += 1
     cumulative = {k: np.cumsum(v) for k, v in counts.items()}
-    return LossSeries(dates, cumulative, "Oryx entries via leedrake5/Russia-Ukraine (MIT)")
+    return LossSeries(
+        dates, cumulative, "Oryx entries via leedrake5/Russia-Ukraine (MIT)", starts_at_zero=True
+    )
+
+
+# --------------------------------------------------------------------------- UCDP GED
+
+UCDP_GED_VERSION = "26.1"
+_GED_STR = ("conflict_name", "dyad_name", "side_a", "side_b", "country")
+_GED_NUM = ("deaths_a", "deaths_b", "deaths_civilians", "deaths_unknown", "best", "low",
+            "high", "latitude", "longitude", "type_of_violence", "date_prec")  # fmt: skip
+
+
+@dataclass(frozen=True)
+class ConflictEvents:
+    """UCDP GED events: one row per event of organised violence.
+
+    ``deaths_a`` / ``deaths_b`` are deaths on ``side_a`` / ``side_b`` (for state-based
+    conflicts side_a is a government); ``best``/``low``/``high`` are total-death
+    estimates including civilians and unknown. ``type_of_violence``: 1 state-based,
+    2 non-state, 3 one-sided violence against civilians.
+    """
+
+    start: NDArray[np.int64]
+    """Event start as days since 1970-01-01."""
+    end: NDArray[np.int64]
+    strings: dict[str, NDArray[np.object_]]
+    numbers: dict[str, NDArray[np.float64]]
+
+    def __len__(self) -> int:
+        return int(self.start.size)
+
+    def __getitem__(self, name: str) -> NDArray[Any]:
+        if name in self.strings:
+            return self.strings[name]
+        return self.numbers[name]
+
+    def select(
+        self,
+        *,
+        country: str | None = None,
+        conflict: str | None = None,
+        type_of_violence: int | None = None,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> ConflictEvents:
+        """Filter by country or conflict name (case-insensitive substring), type, dates."""
+        keep = np.ones(len(self), bool)
+        for field_, needle in (("country", country), ("conflict_name", conflict)):
+            if needle:
+                n = needle.casefold()
+                keep &= np.array([n in str(v).casefold() for v in self.strings[field_]])
+        if type_of_violence is not None:
+            keep &= self.numbers["type_of_violence"] == type_of_violence
+        if start is not None:
+            keep &= self.end >= _epoch_day(start)
+        if end is not None:
+            keep &= self.start <= _epoch_day(end)
+        return ConflictEvents(
+            self.start[keep],
+            self.end[keep],
+            {k: v[keep] for k, v in self.strings.items()},
+            {k: v[keep] for k, v in self.numbers.items()},
+        )
+
+    def daily(
+        self, value: str = "events", start: date | None = None, end: date | None = None
+    ) -> LossSeries:
+        """Daily totals of ``value`` ("events" or a numeric column such as ``best``,
+        ``deaths_a``). Events spanning several days are spread evenly over them."""
+        if not len(self):
+            raise ValueError("no events selected")
+        if value != "events" and value not in self.numbers:
+            raise ValueError(f"unknown value {value!r}")
+        first = _epoch_day(start) if start else int(self.start.min())
+        last = _epoch_day(end) if end else int(self.end.max())
+        n = last - first + 1
+        totals = np.zeros(n)
+        weights = np.ones(len(self)) if value == "events" else np.nan_to_num(self.numbers[value])
+        for s0, e0, w in zip(self.start, self.end, weights, strict=True):
+            lo, hi = max(int(s0), first), min(int(e0), last)
+            if hi < lo or w == 0:
+                continue
+            span = int(e0) - int(s0) + 1
+            totals[lo - first : hi - first + 1] += w / span
+        dates = tuple(date.fromordinal(_EPOCH + first + i) for i in range(n))
+        return LossSeries(
+            dates, {value: np.cumsum(totals)}, f"UCDP GED {UCDP_GED_VERSION}", starts_at_zero=True
+        )
+
+
+_EPOCH = date(1970, 1, 1).toordinal()
+
+
+def _epoch_day(d: date) -> int:
+    return d.toordinal() - _EPOCH
+
+
+@cache
+def _ged_cached(path: str, mtime: float) -> ConflictEvents:
+    import zipfile
+
+    with zipfile.ZipFile(path) as zf:
+        name = next(n for n in zf.namelist() if n.endswith(".csv"))
+        with zf.open(name) as raw:
+            reader = csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8"))
+            starts: list[int] = []
+            ends: list[int] = []
+            strs: dict[str, list[str]] = {k: [] for k in _GED_STR}
+            nums: dict[str, list[float]] = {k: [] for k in _GED_NUM}
+            for row in reader:
+                starts.append(_epoch_day(date.fromisoformat(row["date_start"][:10])))
+                ends.append(_epoch_day(date.fromisoformat(row["date_end"][:10])))
+                for k in _GED_STR:
+                    strs[k].append(row[k])
+                for k in _GED_NUM:
+                    v = row[k]
+                    nums[k].append(float(v) if v not in ("", "NA") else np.nan)
+    return ConflictEvents(
+        np.array(starts, dtype=np.int64),
+        np.array(ends, dtype=np.int64),
+        {k: np.array(v, dtype=object) for k, v in strs.items()},
+        {k: np.array(v, dtype=float) for k, v in nums.items()},
+    )
+
+
+def ucdp_ged(*, max_age_hours: float = 24 * 90, fetch: Fetcher | None = None) -> ConflictEvents:
+    """UCDP Georeferenced Event Dataset 26.1: about 418,000 events of organised violence
+    worldwide, 1989-2025 (CC BY 4.0; please cite Sundberg & Melander 2013 and Davies et
+    al. 2026). Downloads a ~39 MB zip once and caches it; parsing takes a few seconds,
+    then results are cached in memory for the session.
+    """
+    if fetch is not None:
+        tmp = _cache_dir() / "ged-injected.zip"
+        tmp.write_bytes(fetch(_UCDP_GED_URL))
+        return _ged_cached(str(tmp), tmp.stat().st_mtime)
+    path = _cache_dir() / _UCDP_GED_URL.rsplit("/", 1)[-1]
+    if not path.exists() or time.time() - path.stat().st_mtime > max_age_hours * 3600:
+        path.write_bytes(_http_get(_UCDP_GED_URL))
+    return _ged_cached(str(path), path.stat().st_mtime)
 
 
 def _forward_fill(values: NDArray[np.float64]) -> NDArray[np.float64]:

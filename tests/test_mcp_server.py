@@ -37,6 +37,8 @@ def test_lists_all_tools_as_read_only() -> None:
         "loss_intensity",
         "fit_law_to_series",
         "breakpoint_distribution",
+        "conflict_events",
+        "escalation_model",
     }
     assert all(t.annotations and t.annotations.read_only_hint for t in tools)
 
@@ -284,3 +286,55 @@ def test_ukraine_tools_with_stubbed_data(monkeypatch: pytest.MonkeyPatch) -> Non
         call(
             "get_loss_series", source="ukraine_general_staff", category="personnel", side="ukraine"
         )
+
+
+def test_conflict_tools_with_stubbed_ged(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import date
+
+    import numpy as np
+
+    from jomini import data
+    from jomini.escalation import simulate_hawkes
+
+    n = 400
+    counts = simulate_hawkes(n, baseline_rate=3, branching_ratio=0.5, decay=0.7, seed=3)
+    days = np.repeat(np.arange(n), counts.astype(int)) + (date(2022, 1, 1) - date(1970, 1, 1)).days
+    m = days.size
+    ged = data.ConflictEvents(
+        days.astype(np.int64),
+        days.astype(np.int64),
+        {
+            "conflict_name": np.array(["Russia - Ukraine"] * m, dtype=object),
+            "dyad_name": np.array(["Russia - Ukraine"] * m, dtype=object),
+            "side_a": np.array(["Russia"] * m, dtype=object),
+            "side_b": np.array(["Ukraine"] * m, dtype=object),
+            "country": np.array(["Ukraine"] * m, dtype=object),
+        },
+        {
+            "deaths_a": np.full(m, 3.0),
+            "deaths_b": np.full(m, 1.0),
+            "deaths_civilians": np.zeros(m),
+            "deaths_unknown": np.zeros(m),
+            "best": np.full(m, 4.0),
+            "low": np.full(m, 4.0),
+            "high": np.full(m, 4.0),
+            "latitude": np.zeros(m),
+            "longitude": np.zeros(m),
+            "type_of_violence": np.ones(m),
+            "date_prec": np.ones(m),
+        },
+    )
+    monkeypatch.setattr(data, "ucdp_ged", lambda **_: ged)
+    ev = call("conflict_events", conflict="Russia - Ukraine")
+    assert ev["events"] == m and ev["months"][0]["month"] == "2022-01"
+    assert ev["months"][0]["deaths_a"] == pytest.approx(3 * ev["months"][0]["events"], rel=1e-6)
+    esc = call("escalation_model", conflict="Russia - Ukraine")
+    assert esc["constant_background_upper_bound"]["branching_ratio"] > 0.2
+    assert 0 <= esc["spline_background"]["branching_ratio"] < 1
+    assert "hawkes1971" in esc["provenance"]["cite_keys"]
+    trend = call("effectiveness_trend", source="ucdp", every_days=30)
+    assert all(abs(p["ratio"] - 1 / 3) < 0.05 for p in trend["points"] if p["red_losses"] > 50)
+    with pytest.raises(ToolError):
+        call("conflict_events")
+    with pytest.raises(ToolError):
+        call("conflict_events", country="Ukraine", start="last tuesday")
