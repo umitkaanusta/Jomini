@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.4.0
-      - run: uv sync --python 3.13
+      - run: uv sync --python 3.13 --all-extras
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run mypy
