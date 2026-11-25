@@ -319,6 +319,34 @@ REFERENCES: dict[str, Reference] = {
             howpublished="\\url{https://github.com/leedrake5/Russia-Ukraine}",
         ),
         _ref(
+            "randow2026",
+            "article",
+            author="Randow, Charles and Allaire, Ryan H. and Mastroberardino, Antonio",
+            title="Modeling Drone Swarms with a {PDE} Extension of {Lanchester}'s Laws",
+            journal="The Journal of Defense Modeling and Simulation",
+            year="2026",
+            doi="10.1177/15485129261436073",
+        ),
+        _ref(
+            "holling1959",
+            "article",
+            author="Holling, C. S.",
+            title="Some Characteristics of Simple Types of Predation and Parasitism",
+            journal="The Canadian Entomologist",
+            volume="91",
+            number="7",
+            pages="385--398",
+            year="1959",
+        ),
+        _ref(
+            "ivaniuk_missiles",
+            "misc",
+            author="Ivaniuk, Petro",
+            title="Massive Missile Attacks on Ukraine",
+            howpublished="\\url{https://www.kaggle.com/datasets/piterfm/massive-missile-attacks-on-ukraine}",
+            note="CC BY-NC-SA 4.0; compiled from Ukrainian Air Force reports",
+        ),
+        _ref(
             "jomini",
             "misc",
             author='Usta, {\\"U}mit Kaan',
@@ -471,6 +499,25 @@ DATASETS: dict[str, Dataset] = {
                 "Documentation rates differ by side and over time.",
             ),
         ),
+        Dataset(
+            "ukraine_air_raids",
+            "Russian drone and missile raids on Ukraine (nightly)",
+            "Sep 2022-present: attackers launched, destroyed, locationally lost and "
+            "locations hit, by weapon type, from Ukrainian Air Force reports",
+            "night x weapon class",
+            "fetched",
+            "CC BY-NC-SA 4.0 (non-commercial; not bundled)",
+            "jomini.data.ukraine_air_raids(weapon)",
+            ("ivaniuk_missiles",),
+            (
+                "The defender's own reports: interception claims are unverified.",
+                "From autumn 2024 'launched' includes decoy drones (Gerbera etc.), which "
+                "are easier to stop and are not reported separately.",
+                "'Locationally lost' (jammed or vanished) is reported separately only "
+                "from mid-2024 to late 2025; afterwards it is folded into 'destroyed'.",
+                "From August 2026 some per-type missile counts are no longer published.",
+            ),
+        ),
     ]
 }
 
@@ -484,6 +531,7 @@ METHODS: dict[str, tuple[str, ...]] = {
     "kalman": ("rauch1965",),
     "kursk_fits": ("lucas2004", "bracken1995", "fricker1998"),
     "hawkes": ("hawkes1971", "lewis2012", "browning2024"),
+    "air_defense": ("randow2026", "lanchester1916", "holling1959"),
 }
 
 

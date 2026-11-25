@@ -348,6 +348,50 @@ far below Israeli reports. Per-wave salvo data for Iranian attacks (an OSINT com
 is too sparse to fit a saturation model: only the April 2024 attack has interception
 counts.
 
+## Drone swarms against layered air defence
+
+`jomini.airdefense` models a raid flying through bands of defence. It is a one-dimensional
+take on Randow et al.'s PDE extension of Lanchester (2026): the raid advects inbound and
+diffuses. Each layer's shots follow a saturating (Holling type II) curve and draw on a
+finite magazine:
+
+```python
+from jomini.airdefense import generic_defense
+
+defense = generic_defense()            # illustrative: interceptors, mobile guns, missiles
+print(defense.raid(100, attacker_unit_cost=50_000))
+sizes, leak_share, elasticity = defense.leakage_curve([25, 50, 100, 200, 400])
+camp = defense.campaign([150] * 10, restock={"missiles": 3})   # magazine depletion
+```
+
+**Proposition.** If each attacker's chance of being shot down can only fall as more
+attackers are present (capacity limits, magazines), the leak *fraction* can't fall as raids
+grow: leakers rise at least in proportion (elasticity ≥ 1). The module docstring has the
+proof sketch, and a property test checks it on the spatial model.
+
+**Ukraine's data violate it.** `data.ukraine_air_raids()` fetches the Ukrainian Air
+Force's nightly reports (Ivaniuk, Kaggle, CC BY-NC-SA 4.0: fetched, never bundled).
+`saturation_test` compares nights within the same month:
+
+| Nights (≥5 launched) | Log-odds stopped per log raid size (95% CI) | Leak elasticity |
+|---|---|---|
+| Shahed/Geran, Sep 2022 – Aug 2024 | −0.19 (−0.41 to +0.03) | 0.84 |
+| Shahed/Geran, Sep 2024 – Sep 2025 | **+0.46** (+0.36 to +0.57) | 0.59 |
+| Shahed/Geran, Oct 2025 – Nov 2026 | **+0.51** (+0.43 to +0.59) | 0.56 |
+| Cruise missiles, 2022–2026 | **+0.35** (+0.14 to +0.56) | 0.69 |
+| Ballistic missiles, 2022–2026 | +0.59 (−0.06 to +1.25) | 0.86 |
+
+Since autumn 2024, doubling a drone raid within the same month has multiplied the number
+getting through by only about 1.5, not 2. No fixed-capacity defence produces that. The
+change coincides with mass Russian decoy launches and Ukraine's build-up of mobile fire
+groups and interceptor drones. Candidate explanations, which these data can't separate:
+
+- defences surged on warning of big raids (`Layer.surge`: the model needs a surge of
+  about 1 to match);
+- decoys making up more of bigger raids;
+- routing;
+- the defender's own reporting.
+
 ## AI military historian (MCP server)
 
 Jomini includes an [MCP](https://modelcontextprotocol.io) server, so Claude and other AI

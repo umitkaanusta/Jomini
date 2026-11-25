@@ -82,6 +82,9 @@ Research workflow:
   war in Ukraine (Ukrainian General Staff claims; Oryx visually confirmed losses).
 - Time series: get_loss_series, effectiveness_trend (Kalman-smoothed relative
   effectiveness), loss_intensity (smoothed loss rate), fit_law_to_series.
+- Air defence: air_defense_raid simulates drone raids against a layered defence
+  (saturation, magazines, cost exchange); air_defense_saturation_test checks Ukraine's
+  nightly Air Force reports for saturation.
 - Every result carries a "provenance" block; use cite with its cite_keys for BibTeX.
   Report uncertainty (intervals, standard errors) alongside point estimates, and pass on
   the dataset caveats (e.g. Oryx counts only documented losses; General Staff figures are
@@ -1127,6 +1130,137 @@ def escalation_model(
             f"more on average, fading with a half-life of {spline.half_life_days:.1f} days."
         ),
         "provenance": _prov_block(["ucdp_ged" if dataset == "ged" else "ucdp_candidate", "hawkes"]),
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+@_provenance("air_defense")
+def air_defense_raid(
+    raid_sizes: list[float],
+    surge: float = 0.0,
+    magazine_scale: float = 1.0,
+    launch_window_hours: float = 1.0,
+    attacker_unit_cost: float = 50_000,
+    nights: int = 1,
+) -> dict[str, Any]:
+    """Simulate drone raids against an illustrative three-layer air defence (interceptor
+    drones/aircraft 150-300 km out, mobile guns 40-150 km, missiles inside 40 km with a
+    finite, expensive magazine). A spatial Lanchester model: the raid flies in and
+    spreads out; each layer's shots saturate (Holling type II) and draw down magazines.
+
+    Returns leak fraction, kills per layer and cost exchange for each raid size, and
+    the elasticity of leakers with respect to raid size (above 1 = saturation). With
+    ``surge`` > 0 the defence's capacity grows with raid size as
+    (size/100)**surge, modelling forces moved in on warning. With ``nights`` > 1 the
+    largest raid size repeats nightly against magazines restocked at 5% a night, to
+    show magazine depletion. Layer numbers are generic placeholders, not any real
+    order of battle: use for mechanisms, not forecasts.
+    """
+    from jomini.airdefense import generic_defense
+
+    if not raid_sizes or any(s <= 0 or s > 5000 for s in raid_sizes):
+        raise ToolError("raid_sizes must be 1 to 5000 attackers each")
+    if not 0 <= surge <= 3 or not 0.05 <= magazine_scale <= 20:
+        raise ToolError("surge must be in [0, 3] and magazine_scale in [0.05, 20]")
+    if not 1 <= nights <= 60:
+        raise ToolError("nights must be 1 to 60")
+    defense = generic_defense(magazine_scale=magazine_scale).with_surge(surge)
+    sizes = sorted(set(raid_sizes))
+    raids = []
+    for size in sizes:
+        r = defense.raid(size, launch_window=launch_window_hours,
+                         attacker_unit_cost=attacker_unit_cost)  # fmt: skip
+        raids.append(
+            {
+                "launched": size,
+                "leaked": _round(r.leaked),
+                "leak_fraction": _round(r.leak_fraction, 3),
+                "layers": [
+                    {
+                        "layer": x.name,
+                        "kills": _round(x.kills),
+                        "shots": _round(x.shots),
+                        "magazine_left": _round(x.magazine_left),
+                    }
+                    for x in r.layers
+                ],
+                "cost_exchange": _round(r.cost_exchange, 3),
+            }
+        )
+    out: dict[str, Any] = {"raids": raids, "surge": surge}
+    if len(sizes) > 1:
+        _, _, el = defense.leakage_curve(sizes, launch_window=launch_window_hours)
+        out["leak_elasticity"] = [_round(float(e), 3) for e in el]
+    if nights > 1:
+        layers = {x.name: x.magazine for x in defense.layers}
+        restock = {k: 0.05 * v for k, v in layers.items() if math.isfinite(v)}
+        camp = defense.campaign([sizes[-1]] * nights, restock=restock,
+                                launch_window=launch_window_hours)  # fmt: skip
+        out["campaign"] = {
+            "raid_size": sizes[-1],
+            "leak_fraction_by_night": [_round(float(f), 3) for f in camp.leak_fraction],
+            "magazine_empty_after_night": {
+                k: (None if (i := camp.empty_after(k)) is None else i + 1) for k in restock
+            },
+        }
+    return out
+
+
+@server.tool(annotations=_READ_ONLY)
+@_provenance("ukraine_air_raids", "air_defense")
+def air_defense_saturation_test(
+    weapon: Literal["drone", "cruise", "ballistic", "all"] = "drone",
+    start: str | None = None,
+    end: str | None = None,
+    min_launched: int = 5,
+) -> dict[str, Any]:
+    """Does Ukraine's air defence saturate? Tests whether the share of attackers stopped
+    falls (saturation) or rises with raid size, comparing nights within the same month
+    (beta-binomial regression with month effects), from the Ukrainian Air Force's
+    nightly reports.
+
+    Theory: if each attacker's chance of being shot down can only fall as more attackers
+    are present (fixed capacity, finite magazines), interception can't improve with raid
+    size, so ``slope`` <= 0 and leak elasticity >= 1. A significantly positive slope
+    rejects every such model and points to surge on warning, decoys in bigger raids,
+    routing or reporting. Data are the defender's own claims (see caveats).
+    """
+    from datetime import date as _date
+
+    from jomini import data
+    from jomini.airdefense import saturation_test
+
+    try:
+        s0 = _date.fromisoformat(start) if start else None
+        e0 = _date.fromisoformat(end) if end else None
+    except ValueError:
+        raise ToolError("start and end must be ISO dates like 2025-10-01") from None
+    nights = data.ukraine_air_raids(weapon).select(start=s0, end=e0, min_launched=min_launched)
+    if len(nights) < 20:
+        raise ToolError("fewer than 20 nights match; widen the dates or lower min_launched")
+    try:
+        res = saturation_test(nights.launched, nights.stopped, nights.months)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    lo, hi = res.interval
+    share = nights.stopped.sum() / nights.launched.sum()
+    return {
+        "weapon": weapon,
+        "period": [nights.dates[0].isoformat(), nights.dates[-1].isoformat()],
+        "nights": res.nights,
+        "months": res.periods,
+        "launched": round(float(nights.launched.sum())),
+        "stopped_share": _round(float(share), 3),
+        "slope": _round(res.slope, 3),
+        "slope_95ci": [_round(lo, 3), _round(hi, 3)],
+        "leak_elasticity": _round(res.leak_elasticity, 3),
+        "leak_elasticity_se": _round(res.leak_elasticity_se, 3),
+        "verdict": res.verdict,
+        "interpretation": (
+            f"Within a month, doubling a raid multiplies the odds an attacker is stopped by "
+            f"{2**res.slope:.2f} and the number that get through by about "
+            f"{2**res.leak_elasticity:.2f} (proportional would be 2)."
+        ),
     }
 
 

@@ -580,3 +580,144 @@ def _forward_fill(values: NDArray[np.float64]) -> NDArray[np.float64]:
         else:
             last = v
     return out
+
+
+# ------------------------------------------------------------- Ukraine air raids
+
+_AIR_RAIDS_URL = (
+    "https://www.kaggle.com/api/v1/datasets/download/piterfm/massive-missile-attacks-on-ukraine"
+)
+WeaponClass = Literal["drone", "cruise", "ballistic", "all"]
+_DRONE = ("shahed", "geran")
+_CRUISE = ("x-101", "x-555", "kalibr", "x-59", "x-69", "iskander-k", "x-22", "x-32",
+           "x-35", "oniks", "zircon")  # fmt: skip
+_BALLISTIC = ("iskander-m", "kn-23", "c-300", "c-400", "kinzhal", "ballistic")
+
+
+def weapon_class(model: str) -> str:
+    """``"drone"`` (Shahed/Geran one-way attack drones), ``"cruise"``, ``"ballistic"``,
+    ``"mixed"`` (a report lumping classes together) or ``"other"`` (reconnaissance
+    and frontline drones, guided bombs, unknown)."""
+    classes = set()
+    for part in model.casefold().split(" and "):
+        if any(k in part for k in _DRONE):
+            classes.add("drone")
+        elif any(k in part for k in _BALLISTIC):
+            classes.add("ballistic")
+        elif any(k in part for k in _CRUISE):
+            classes.add("cruise")
+        else:
+            classes.add("other")
+    return classes.pop() if len(classes) == 1 else "mixed"
+
+
+@dataclass(frozen=True)
+class RaidNights:
+    """Nightly totals of attackers launched and stopped (one row per night)."""
+
+    dates: tuple[date, ...]
+    launched: NDArray[np.float64]
+    destroyed: NDArray[np.float64]
+    stopped: NDArray[np.float64]
+    """Destroyed plus "locationally lost" (jammed or decoys that vanished), at most launched."""
+    hit_locations: NDArray[np.float64]
+    """Reported locations hit (NaN when not reported, before mid-2025)."""
+    weapon: str
+
+    def __len__(self) -> int:
+        return len(self.dates)
+
+    @property
+    def months(self) -> list[str]:
+        return [d.strftime("%Y-%m") for d in self.dates]
+
+    def select(
+        self, *, start: date | None = None, end: date | None = None, min_launched: float = 1
+    ) -> RaidNights:
+        keep = np.array(
+            [(start is None or d >= start) and (end is None or d <= end) for d in self.dates],
+            dtype=bool,
+        ) & (self.launched >= min_launched)
+        return RaidNights(
+            tuple(d for d, k in zip(self.dates, keep, strict=True) if k),
+            self.launched[keep],
+            self.destroyed[keep],
+            self.stopped[keep],
+            self.hit_locations[keep],
+            self.weapon,
+        )
+
+
+def _num(v: str) -> float:
+    try:
+        return float(v)
+    except ValueError:
+        return np.nan
+
+
+def ukraine_air_raids(
+    weapon: WeaponClass = "drone",
+    *,
+    max_age_hours: float = 24,
+    fetch: Fetcher | None = None,
+) -> RaidNights:
+    """Russian drone and missile attacks on Ukraine, night by night, from the Ukrainian
+    Air Force's reports (Petro Ivaniuk, *Massive Missile Attacks on Ukraine*, Kaggle,
+    CC BY-NC-SA 4.0: fetched, never bundled; non-commercial use only).
+
+    Starts in autumn 2022 for drones. Each report gives attackers launched, destroyed
+    and (from mid-2024) "locationally lost". When a night has a nationwide report
+    (``target == "Ukraine"``) only that is used, since regional commands' posts
+    overlap it; otherwise regional reports are summed.
+
+    :param weapon: ``"drone"`` (Shahed/Geran), ``"cruise"``, ``"ballistic"`` or ``"all"``
+        (including mixed reports, excluding reconnaissance and frontline drones).
+    """
+    import zipfile
+
+    raw = _fetch(_AIR_RAIDS_URL, max_age_hours, fetch)
+    if raw[:2] == b"PK":
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            text = zf.read("missile_attacks_daily.csv").decode("utf-8")
+    else:
+        text = raw.decode("utf-8")
+    wanted = {"drone", "cruise", "ballistic", "mixed"} if weapon == "all" else {weapon}
+    if weapon not in ("drone", "cruise", "ballistic", "all"):
+        raise ValueError("weapon must be 'drone', 'cruise', 'ballistic' or 'all'")
+    rows: dict[date, list[tuple[bool, float, float, float, float]]] = {}
+    for row in csv.DictReader(io.StringIO(text)):
+        if weapon_class(row["model"]) not in wanted:
+            continue
+        launched = _num(row["launched"])
+        if not launched > 0:
+            continue
+        day = date.fromisoformat(row["time_start"][:10])
+        destroyed = np.nan_to_num(_num(row["destroyed"]))
+        lost = np.nan_to_num(_num(row["not_reach_goal"]))
+        hits = _num(row.get("num_hit_location", ""))
+        rows.setdefault(day, []).append(
+            (row["target"] == "Ukraine", launched, float(destroyed), float(lost), hits)
+        )
+    dates = sorted(rows)
+    out = np.zeros((len(dates), 4))
+    for i, day in enumerate(dates):
+        entries = rows[day]
+        if any(e[0] for e in entries):
+            entries = [e for e in entries if e[0]]
+        arr = np.array([e[1:] for e in entries], float)
+        hit_col = arr[:, 3]
+        out[i] = (
+            arr[:, 0].sum(),
+            arr[:, 1].sum(),
+            arr[:, 2].sum(),
+            np.nansum(hit_col) if np.isfinite(hit_col).any() else np.nan,
+        )
+    launched_a, destroyed_a = out[:, 0], np.minimum(out[:, 1], out[:, 0])
+    return RaidNights(
+        tuple(dates),
+        launched_a,
+        destroyed_a,
+        np.minimum(out[:, 1] + out[:, 2], out[:, 0]),
+        out[:, 3],
+        weapon,
+    )
