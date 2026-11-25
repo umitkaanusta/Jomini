@@ -306,6 +306,18 @@ men?" and get answers based on the data instead of guesses.
 | `compare_effectiveness` | How deadly a state's soldiers were against their enemies, battle by battle |
 | `combat_power` | Which factors (leadership, surprise, posture, ...) made soldiers deadlier, overall or for one battle |
 | `salvo_exchange` | Missile, drone-swarm or naval exchanges with Hughes' salvo model |
+| `list_datasets` | Every dataset's coverage, licence, access and caveats |
+| `cite` | BibTeX for datasets, methods and Jomini itself |
+| `get_loss_series` | Loss time series: Kursk daily, Ukrainian General Staff claims, Oryx |
+| `effectiveness_trend` | How relative effectiveness changed over time (Kalman-smoothed, with bands) |
+| `loss_intensity` | Smoothed loss rate behind a noisy series |
+| `fit_law_to_series` | Fit each side's attrition law to per-period strengths and losses |
+| `breakpoint_distribution` | How much a side loses before it breaks, for a given year |
+
+Every tool result carries a `provenance` block listing its sources and methods with
+`cite_keys`. Pass those keys to `cite` (or `jomini.catalog.bibtex`) to get BibTeX. Each
+dataset's caveats (e.g. "one side's claims", "documented losses only") are part of the
+catalogue, and agents are instructed to pass them on.
 
 **Claude Code:**
 
@@ -325,6 +337,20 @@ claude mcp add jomini -- uvx --from "jomini[mcp]" jomini-mcp
 
 Until 1.0 is on PyPI, install from GitHub instead:
 `uvx --from "jomini[mcp] @ git+https://github.com/umitkaanusta/Jomini" jomini-mcp`.
+
+## Research workflow: provenance and citation
+
+```python
+from jomini import catalog
+
+catalog.DATASETS["kursk"].caveats  # read before drawing conclusions
+print(catalog.bibtex(["cdb90", "law_estimation", "breakpoints"]))  # data + methods + Jomini
+```
+
+`jomini.catalog` records each dataset's coverage, unit, access (bundled or fetched),
+licence, caveats and references, plus the references behind each method. DOIs and page
+ranges appear only where they were checked; verify entries against the publisher before
+formal citation.
 
 ## The models
 

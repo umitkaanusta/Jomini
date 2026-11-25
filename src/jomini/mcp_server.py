@@ -5,9 +5,13 @@ Run with ``jomini-mcp`` (needs ``pip install "jomini[mcp]"``). Tools return JSON
 
 from __future__ import annotations
 
+import functools
 import math
 import statistics
+from collections.abc import Callable
 from typing import Any, Literal
+
+import numpy as np
 
 try:
     from mcp.server.mcpserver import MCPServer
@@ -16,7 +20,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError('the MCP server needs the mcp extra: pip install "jomini[mcp]"') from exc
 
-from jomini import Battle, GeneralLaw, LinearLaw, LogarithmicLaw, SquareLaw, cdb90
+from jomini import Battle, GeneralLaw, LinearLaw, LogarithmicLaw, SquareLaw, catalog, cdb90
 from jomini.cdb90 import HistoricalBattle, Side
 from jomini.models import LanchesterModel
 from jomini.research import combat_power_model, estimate_exponent, relative_effectiveness
@@ -30,6 +34,30 @@ _LAWS: dict[str, tuple[type[LanchesterModel], float]] = {
 }
 _ROLE = {"red": "attacker", "blue": "defender"}
 _READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+
+
+def _provenance(
+    *keys: str,
+) -> Callable[[Callable[..., dict[str, Any]]], Callable[..., dict[str, Any]]]:
+    """Append the sources and methods behind a tool's result, with keys for `cite`."""
+    refs = catalog.references_for(keys)
+    block = {
+        "sources": [r.short for r in refs],
+        "cite_keys": [r.key for r in refs],
+        "jomini_version": catalog.VERSION,
+    }
+
+    def decorate(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            out = fn(*args, **kwargs)
+            out["provenance"] = block
+            return out
+
+        return wrapper
+
+    return decorate
+
 
 INSTRUCTIONS = """\
 Jomini gives you quantitative military history: CDB90, a US Army database of 660 land
@@ -47,6 +75,17 @@ Conventions:
 - combat_power explains effectiveness with analysts' ratings (leadership, training,
   surprise, ...). Those ratings were assigned with the outcome known: treat the
   multipliers as associations, not causes.
+
+Research workflow:
+- Start with list_datasets: it gives each dataset's coverage, licence and caveats. Datasets:
+  CDB90 (660 battles), Livermore (63 Civil War battles), Kursk (daily, both sides), and the
+  war in Ukraine (Ukrainian General Staff claims; Oryx visually confirmed losses).
+- Time series: get_loss_series, effectiveness_trend (Kalman-smoothed relative
+  effectiveness), loss_intensity (smoothed loss rate), fit_law_to_series.
+- Every result carries a "provenance" block; use cite with its cite_keys for BibTeX.
+  Report uncertainty (intervals, standard errors) alongside point estimates, and pass on
+  the dataset caveats (e.g. Oryx counts only documented losses; General Staff figures are
+  one side's claims).
 
 Be honest about limits: figures are historical estimates, Lanchester models capture
 attrition only (not manoeuvre, morale collapse or command), and counterfactuals are
@@ -123,6 +162,7 @@ def _require_fittable(b: HistoricalBattle) -> None:
 
 
 @server.tool(annotations=_READ_ONLY)
+@_provenance("cdb90")
 def search_battles(
     query: str | None = None,
     war: str | None = None,
@@ -155,6 +195,7 @@ def search_battles(
 
 
 @server.tool(annotations=_READ_ONLY)
+@_provenance("cdb90")
 def get_battle(battle: int | str, include_narrative: bool = True) -> dict[str, Any]:
     """Full record of one battle by CDB90 id or name (e.g. 145 or "Waterloo").
 
@@ -192,6 +233,7 @@ def get_battle(battle: int | str, include_narrative: bool = True) -> dict[str, A
 
 
 @server.tool(annotations=_READ_ONLY)
+@_provenance("cdb90", "lanchester")
 def fit_battle(battle: int | str, law: LawName = "linear") -> dict[str, Any]:
     """Fit a Lanchester law to a battle's historical losses.
 
@@ -223,6 +265,7 @@ def fit_battle(battle: int | str, law: LawName = "linear") -> dict[str, Any]:
 
 
 @server.tool(annotations=_READ_ONLY)
+@_provenance("cdb90", "lanchester", "breakpoints")
 def what_if(
     battle: int | str,
     attacker_strength_factor: float = 1.0,
@@ -320,6 +363,7 @@ def what_if(
 
 
 @server.tool(annotations=_READ_ONLY)
+@_provenance("lanchester", "breakpoints")
 def simulate_battle(
     attacker_strength: float,
     defender_strength: float,
@@ -389,38 +433,62 @@ def estimate_law(
     year_to: int | None = None,
     query: str | None = None,
     adjust_for_quality: bool = True,
+    dataset: Literal["cdb90", "livermore"] = "cdb90",
 ) -> dict[str, Any]:
     """Estimate which Lanchester law a set of historical battles follows.
 
-    Filters CDB90 like search_battles (all battles if no filters) and estimates the
+    Filters the battles like search_battles (all if no filters) and estimates the
     exponent e = p - q + 1 (2 = square, 1 = linear, 0 = logarithmic) as the value at which
     fighting effectiveness is independent of force ratio (Helmbold's criterion), with a
-    95% bootstrap confidence interval. With adjust_for_quality (default), effectiveness
-    only has to be independent of force ratio after accounting for the analysts' quality
-    ratings, so that a side's numbers aren't credited with its quality. Needs at least 10
-    battles with complete data (more when adjusting).
+    95% bootstrap confidence interval. With adjust_for_quality (default; CDB90 only),
+    effectiveness only has to be independent of force ratio after accounting for the
+    analysts' quality ratings, so a side's numbers aren't credited with its quality.
+    dataset="livermore" uses 63 Civil War battles from Livermore (1900) instead, a useful
+    replication check: estimates on one war's ~50 battles depend on which battles a
+    source chose. Needs at least 10 battles with complete data (more when adjusting).
     """
-    pool = cdb90.search(
-        query, war=war, actor=actor, year_from=year_from, year_to=year_to, fittable=True
+    from jomini import data
+
+    source = cdb90.battles() if dataset == "cdb90" else data.livermore()
+    adjust = adjust_for_quality and dataset == "cdb90"
+    pool = (
+        cdb90.search(
+            query, war=war, actor=actor, year_from=year_from, year_to=year_to, fittable=True
+        )
+        if dataset == "cdb90"
+        else [
+            b
+            for b in source
+            if b.fittable
+            and (year_from is None or b.year >= year_from)
+            and (year_to is None or b.year <= year_to)
+            and (query is None or query.casefold() in b.name.casefold())
+        ]
     )
     try:
-        est = estimate_exponent(
-            pool, n_boot=500, adjust_for="quality" if adjust_for_quality else None
-        )
+        est = estimate_exponent(pool, n_boot=500, adjust_for="quality" if adjust else None)
     except ValueError as exc:
         raise ToolError(f"{exc} (matched {len(pool)} battles with complete data)") from None
+    refs = catalog.references_for([dataset, "law_estimation"])
     return {
+        "dataset": dataset,
         "exponent": _round(est.exponent, 3),
         "ci_95": [_round(est.ci_low, 3), _round(est.ci_high, 3)],
         "n_battles": est.n,
         "nearest_law": est.nearest_law,
         "excluded_laws": [law for law in _LAWS if est.excludes(law)],
-        "adjusted_for_quality": adjust_for_quality,
+        "adjusted_for_quality": adjust,
         "summary": str(est),
+        "provenance": {
+            "sources": [r.short for r in refs],
+            "cite_keys": [r.key for r in refs],
+            "jomini_version": catalog.VERSION,
+        },
     }
 
 
 @server.tool(annotations=_READ_ONLY)
+@_provenance("cdb90", "law_estimation")
 def compare_effectiveness(
     actor: str,
     opponent: str | None = None,
@@ -482,6 +550,7 @@ def compare_effectiveness(
 
 
 @server.tool(annotations=_READ_ONLY)
+@_provenance("cdb90", "combat_power")
 def combat_power(battle: int | str | None = None) -> dict[str, Any]:
     """Which quality factors made soldiers deadlier, across all of CDB90?
 
@@ -522,6 +591,7 @@ def combat_power(battle: int | str | None = None) -> dict[str, Any]:
 
 
 @server.tool(annotations=_READ_ONLY)
+@_provenance("salvo")
 def salvo_exchange(
     attacker_units: float,
     defender_units: float,
@@ -563,6 +633,340 @@ def salvo_exchange(
         "attacker_units": [_round(x) for x in result.red],
         "defender_units": [_round(x) for x in result.blue],
         "fractional_exchange_ratio": _round(fer),
+    }
+
+
+# --------------------------------------------------------------------------- research
+
+
+SeriesSource = Literal["kursk", "ukraine_oryx_events", "ukraine_oryx", "ukraine_general_staff"]
+
+
+def _series_pair(source: str, category: str, every_days: int) -> tuple[Any, Any, list[str], str]:
+    """(red LossSeries-like, blue, side names, note) on a common period grid."""
+    from datetime import date as _date
+
+    from jomini import data
+
+    if source == "kursk":
+        k = data.kursk()
+        if category not in ("casualties", "tanks_lost", "apcs_lost", "artillery_lost"):
+            raise ToolError(
+                "for kursk, category is casualties, tanks_lost, apcs_lost or artillery_lost"
+            )
+        dates = k.dates
+        red = data.LossSeries(dates, {category: np.cumsum(k.series["german"][category])}, "")
+        blue = data.LossSeries(dates, {category: np.cumsum(k.series["soviet"][category])}, "")
+        return red, blue, ["german", "soviet"], "Daily; the Germans attack."
+    if source in ("ukraine_oryx_events", "ukraine_oryx"):
+        loader = data.ukraine_oryx_events if source == "ukraine_oryx_events" else data.ukraine_oryx
+        ru, ua = loader("Russia"), loader("Ukraine")
+        start: _date = max(ru.dates[0], ua.dates[0])
+        end: _date = min(ru.dates[-1], ua.dates[-1])
+        for s_ in (ru, ua):
+            if category not in s_.cumulative:
+                raise ToolError(
+                    f"unknown category {category!r}; try one of "
+                    + ", ".join(sorted(s_.cumulative)[:25])
+                )
+        return (
+            ru.resample(every_days, start, end),
+            ua.resample(every_days, start, end),
+            ["russia", "ukraine"],
+            f"{every_days}-day periods, {start} to {end}.",
+        )
+    raise ToolError("two-sided sources are kursk, ukraine_oryx_events and ukraine_oryx")
+
+
+@server.tool(annotations=_READ_ONLY)
+def list_datasets() -> dict[str, Any]:
+    """Catalogue of every dataset Jomini can use: coverage, unit of observation, access
+    (bundled or fetched from the web at call time), licence, caveats and how to cite it.
+    Read the caveats before drawing conclusions from a dataset."""
+    return {
+        "datasets": [
+            {
+                "id": d.id,
+                "title": d.title,
+                "coverage": d.coverage,
+                "unit": d.unit,
+                "access": d.access,
+                "licence": d.licence,
+                "python": d.loader,
+                "caveats": list(d.caveats),
+                "cite": [r.short for r in d.references()],
+                "cite_keys": list(d.cite),
+            }
+            for d in catalog.DATASETS.values()
+        ],
+        "methods": {
+            k: [catalog.REFERENCES[r].short for r in v] for k, v in catalog.METHODS.items()
+        },
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+def cite(keys: list[str]) -> dict[str, Any]:
+    """BibTeX for datasets (e.g. "cdb90", "kursk"), methods (e.g. "law_estimation",
+    "breakpoints", "kalman", "sindy") or reference keys from any tool's provenance.
+    Always includes Jomini itself. Verify entries against publishers before formal use."""
+    try:
+        refs = catalog.references_for([*keys, "jomini"])
+    except KeyError as exc:
+        raise ToolError(str(exc.args[0])) from None
+    return {
+        "bibtex": "\n\n".join(r.bibtex() for r in refs),
+        "labels": {r.key: r.short for r in refs},
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+def get_loss_series(
+    source: SeriesSource,
+    category: str,
+    side: Literal["russia", "ukraine", "german", "soviet"] = "russia",
+    every_days: int = 7,
+    max_points: int = 400,
+) -> dict[str, Any]:
+    """Loss time series per period from a time-series dataset (see list_datasets).
+
+    Categories: kursk -> manpower, casualties, tanks, tanks_lost, apcs, apcs_lost,
+    artillery, artillery_lost (side german/soviet, daily). ukraine_general_staff ->
+    personnel, tank, APC, "field artillery", drone, ... (Russian side only).
+    ukraine_oryx / ukraine_oryx_events -> Oryx classes such as "Tanks" or "All Types".
+    Returns period dates, losses per period and cumulative totals.
+    """
+    from jomini import data
+
+    if not 1 <= every_days <= 365:
+        raise ToolError("every_days must be between 1 and 365")
+    if source == "kursk":
+        if side not in ("german", "soviet"):
+            raise ToolError("kursk sides are german and soviet")
+        k = data.kursk()
+        if category not in k.series[side]:
+            raise ToolError(f"kursk categories: {', '.join(k.series[side])}")
+        values = k.series[side][category]
+        rows = [
+            {"date": d.isoformat(), "value": float(v)} for d, v in zip(k.dates, values, strict=True)
+        ]
+        return {
+            "source": source,
+            "side": side,
+            "category": category,
+            "points": rows,
+            "note": "Daily values as reported (on-hand counts or losses that day).",
+            "provenance": _prov_block(["kursk"]),
+        }
+    if source == "ukraine_general_staff":
+        if side != "russia":
+            raise ToolError("ukraine_general_staff only covers Russian losses")
+        series = data.ukraine_general_staff()
+    elif source in ("ukraine_oryx", "ukraine_oryx_events"):
+        if side not in ("russia", "ukraine"):
+            raise ToolError("Ukraine war sides are russia and ukraine")
+        loader = data.ukraine_oryx if source == "ukraine_oryx" else data.ukraine_oryx_events
+        series = loader("Russia" if side == "russia" else "Ukraine")
+    else:
+        raise ToolError(f"unknown source {source!r}")
+    if category not in series.cumulative:
+        raise ToolError("unknown category; available: " + ", ".join(sorted(series.cumulative)))
+    grid = series.resample(every_days)
+    per = grid.daily(category)
+    rows = [
+        {"period_end": d.isoformat(), "losses": float(x), "cumulative": float(c)}
+        for d, x, c in zip(grid.dates, per, grid.cumulative[category], strict=True)
+    ]
+    return {
+        "source": source,
+        "side": side,
+        "category": category,
+        "every_days": every_days,
+        "points": rows[-max_points:],
+        "truncated": len(rows) > max_points,
+        "provenance": _prov_block([source]),
+    }
+
+
+def _prov_block(keys: list[str]) -> dict[str, Any]:
+    refs = catalog.references_for(keys)
+    return {
+        "sources": [r.short for r in refs],
+        "cite_keys": [r.key for r in refs],
+        "jomini_version": catalog.VERSION,
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+def effectiveness_trend(
+    source: Literal["kursk", "ukraine_oryx_events", "ukraine_oryx"],
+    category: str = "All Types",
+    every_days: int = 28,
+    level: float = 0.9,
+) -> dict[str, Any]:
+    """How one side's per-unit effectiveness relative to the other changed over time.
+
+    Treats log(rho/beta) as a hidden random walk and recovers its path with a Kalman
+    smoother from each period's losses (linear law, under which strengths cancel and the
+    ratio is the inverse loss-exchange ratio; counting noise plus estimated
+    overdispersion). Red is the first side: Germany at Kursk (category casualties,
+    tanks_lost, ...), Russia for the Ukraine sources (Oryx classes, e.g. "Tanks").
+    Ratio > 1 means red inflicted more losses per loss suffered. Oryx counts documented
+    losses only; documentation rates differ by side and time.
+    """
+    from jomini.dynamics import effectiveness_over_time
+
+    if not 0.5 <= level < 1:
+        raise ToolError("level must be in [0.5, 1)")
+    if source == "kursk":
+        cat = "casualties" if category == "All Types" else category
+        red, blue, sides, note = _series_pair(source, cat, 1)
+        rl = np.diff(red.cumulative[cat], prepend=0.0)
+        bl = np.diff(blue.cumulative[cat], prepend=0.0)
+        dates = red.dates
+    else:
+        if not 1 <= every_days <= 365:
+            raise ToolError("every_days must be between 1 and 365")
+        cat = category
+        red, blue, sides, note = _series_pair(source, cat, every_days)
+        rl, bl = red.daily(cat)[1:], blue.daily(cat)[1:]
+        dates = red.dates[1:]
+    try:
+        path = effectiveness_over_time(rl, bl)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    lo, hi = path.interval(level)
+    return {
+        "red": sides[0],
+        "blue": sides[1],
+        "category": cat,
+        "note": note,
+        "points": [
+            {
+                "period_end": d.isoformat(),
+                "ratio": _round(r),
+                "low": _round(a),
+                "high": _round(b),
+                "red_losses": float(x),
+                "blue_losses": float(y),
+            }
+            for d, r, a, b, x, y in zip(dates, path.ratio(), lo, hi, rl, bl, strict=True)
+        ],
+        "interval_level": level,
+        "step_sd_per_period": _round(path.step_sd),
+        "overdispersion_sd": _round(path.overdispersion_sd),
+        "provenance": _prov_block([source, "kalman", "lanchester"]),
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+def loss_intensity(
+    source: Literal["ukraine_general_staff", "ukraine_oryx_events", "ukraine_oryx"],
+    category: str,
+    side: Literal["russia", "ukraine"] = "russia",
+    every_days: int = 7,
+    level: float = 0.9,
+) -> dict[str, Any]:
+    """Smoothed underlying loss rate behind a noisy loss series, with a credible band.
+
+    E.g. Russian personnel losses claimed by Ukraine per week, or confirmed Ukrainian tank
+    losses per 28 days. Uses a Kalman smoother on log losses (counting noise plus
+    estimated overdispersion); negative corrections are treated as missing.
+    """
+    from jomini.dynamics import intensity_over_time
+
+    series_out = get_loss_series(source, category, side, every_days, max_points=100_000)
+    points = series_out["points"][1:]
+    losses = np.array([p["losses"] for p in points])
+    try:
+        path = intensity_over_time(losses)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    lo, hi = path.interval(level)
+    return {
+        "source": source,
+        "side": side,
+        "category": category,
+        "every_days": every_days,
+        "points": [
+            {
+                "period_end": p["period_end"],
+                "observed": p["losses"],
+                "rate": _round(r),
+                "low": _round(a),
+                "high": _round(b),
+            }
+            for p, r, a, b in zip(points, path.ratio(), lo, hi, strict=True)
+        ],
+        "provenance": _prov_block([source, "kalman"]),
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+def fit_law_to_series(
+    red: list[float],
+    blue: list[float],
+    red_losses: list[float],
+    blue_losses: list[float],
+) -> dict[str, Any]:
+    """Fit Bracken's law separately for each side from per-period strengths and losses:
+    own_losses = coefficient * enemy^p * own^q (log-linear least squares, with standard
+    errors). Use for daily or weekly engagement data where strengths may include
+    reinforcements. Large standard errors mean the data can't pin the law down (e.g.
+    Kursk: strengths vary too little over 14 days). Set red/blue to the strengths at the
+    start of each period.
+    """
+    from jomini.discovery import fit_power_law_from_losses
+
+    try:
+        fit = fit_power_law_from_losses(red, blue, red_losses, blue_losses)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+
+    def side(s: Any) -> dict[str, Any]:
+        return {
+            "coefficient": s.coefficient,
+            "p_enemy": _round(s.p),
+            "p_se": _round(s.p_se),
+            "q_own": _round(s.q),
+            "q_se": _round(s.q_se),
+            "exponent_e": _round(s.exponent),
+            "r_squared": _round(s.r_squared),
+            "n": s.n,
+        }
+
+    return {
+        "red": side(fit.red),
+        "blue": side(fit.blue),
+        "provenance": _prov_block(["lanchester", "kursk_fits"]),
+    }
+
+
+@server.tool(annotations=_READ_ONLY)
+def breakpoint_distribution(year: int = 1900) -> dict[str, Any]:
+    """How much of its strength a side loses before it breaks, for a given year.
+
+    Log-normal model fitted to CDB90 by maximum likelihood with censoring (the loser's
+    losses are its breakpoint; the winner's only bound its own). Returns quantiles of
+    the breakpoint for attackers and defenders.
+    """
+    from jomini.stochastic import default_breakpoints
+
+    bp = default_breakpoints()
+    qs = (0.1, 0.25, 0.5, 0.75, 0.9)
+    return {
+        "year": year,
+        "attacker": {str(q): _round(bp.quantile(q, year, "attacker"), 3) for q in qs},
+        "defender": {str(q): _round(bp.quantile(q, year, "defender"), 3) for q in qs},
+        "model": {
+            "intercept": bp.intercept,
+            "per_century": bp.year_slope,
+            "defender_shift": bp.defender_shift,
+            "sigma": bp.sigma,
+            "n_sides": bp.n,
+        },
+        "note": "Values are fractions of starting strength lost; 1.0 means fight to the end.",
+        "provenance": _prov_block(["cdb90", "breakpoints"]),
     }
 
 

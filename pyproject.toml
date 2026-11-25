@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "Jomini"
-version = "1.0.0"
+version = "1.1.0"
 description = "Lanchester-type combat models for simulating historical and fictional battles"
 readme = "README.md"
 license = "MIT"
