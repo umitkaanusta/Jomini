@@ -21,7 +21,7 @@ EQUATIONS = {
     r" - \sum_k h_k\,\mathbf{1}[x \in \mathrm{ring}\ k]\,u$",
     "rings": r"$N_k = \int_{\mathrm{ring}\ k} u\,dx, \qquad s_k = \dfrac{F_k\,e_k\,N_k}"
     r"{F_k + e_k\,N_k}, \qquad h_k = \dfrac{p_k\,s_k}{N_k}, \qquad \dfrac{dM_k}{dt} = -s_k$",
-    "strike": r"$s_{kj} = \dfrac{F_k\,e_k\,N_{kj}}{F_k + e_k \sum_i N_{ki}}, \qquad"
+    "strike": r"$s_{kj} = \dfrac{F_k\,e_{kj}\,N_{kj}}{F_k + \sum_i e_{ki}\,N_{ki}}, \qquad"
     r" h_{kj} = \dfrac{p_{kj}\,s_{kj}}{N_{kj}}, \qquad \dfrac{dM_k}{dt} = -\sum_j s_{kj}$",
     "waterloo": r"$\dfrac{dR}{dt} = -\beta\,R\,B, \qquad \dfrac{dB}{dt} = -\rho\,R\,B$",
 }
