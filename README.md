@@ -121,48 +121,81 @@ uv run python scripts/make_raid_gif.py
 
 ## A missile and drone strike
 
-![A hundred ballistic missiles alone: 6 get through. The same missiles behind 150 drones: 33 get through](docs/strike.gif)
+![120 ballistic missiles against a layered defence, alone and behind drones and cruise missiles: 29 get through either way](docs/strike.gif)
 
-A hundred ballistic missiles fly at a city. In the top run they come alone. In the bottom
-run, 150 drones are sent first, timed to reach the city just before the missiles, as in
-the mass strikes of the Iran–Israel wars. Three rings defend the city: fighters that hunt
-drones far out, an upper tier that shoots only at missiles, and a lower tier near the city
-that shoots at both.
+A hundred and twenty medium-range ballistic missiles fly at a country defended in layers,
+as Israel is. Arrow 3 batteries and Aegis destroyers reach far out, Arrow 2, David's Sling
+and Iron Dome guard closer in, and fighters hunt drones. In the top run the missiles come
+alone. In the bottom run, 170 drones and 30 cruise missiles are sent first, timed to
+arrive with the missiles, as in Iran's attacks of 2024.
 
-The model is the drone raid model, extended so that drones and missiles share the
-defence. A ring splits its fire between the attackers inside it in proportion to their
-numbers, a rule from C. S. Holling's work on predators and prey (1959).
+The defence is built from Jomini's [equipment catalogue](#pick-your-equipment). The model
+is the drone raid model, extended so that drones and missiles share the sky. Each system
+splits its fire between the attackers inside it in proportion to their numbers, a rule
+from C. S. Holling's work on predators and prey (1959).
 
-Alone, 6 missiles in 100 get through. Behind the drones, 33 do: the drones use up the
-lower tier's interceptors before the missiles arrive.
+The drones don't help the missiles. The same 29 missiles in 120 get through either way,
+because the systems that stop ballistic missiles never fire at drones. Fighters and Iron
+Dome deal with the drones and cruise missiles, and the defence spends $638 million
+instead of $557 million. (On the real night in April 2024 far fewer missiles got
+through; see [how far to trust the numbers](#pick-your-equipment).)
 
 <details>
 <summary>The equations and the numbers</summary>
 
-Each wave <i>j</i> (drones, missiles) has its own density <i>u</i><sub>j</sub>(<i>x</i>, <i>t</i>) and speed <i>v</i><sub>j</sub>, and
-follows the same equation as the drone raid. Ring <i>k</i> fires at all the waves it can
-engage and splits its shots between them:
+Each wave <i>j</i> (drones, cruise missiles, ballistic missiles) has its own density
+<i>u</i><sub>j</sub>(<i>x</i>, <i>t</i>) and speed <i>v</i><sub>j</sub>, and follows the
+same equation as the drone raid. System <i>k</i> fires at every wave it can engage and
+splits its shots between them:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/eq/strike-dark.svg">
-  <img alt="s_kj = F_k e_k N_kj / (F_k + e_k sum_i N_ki); h_kj = p_kj s_kj / N_kj; dM_k/dt = -sum_j s_kj" src="docs/eq/strike-light.svg">
+  <img alt="s_kj = F_k e_kj N_kj / (F_k + sum_i e_ki N_ki); h_kj = p_kj s_kj / N_kj; dM_k/dt = -sum_j s_kj" src="docs/eq/strike-light.svg">
 </picture>
 
-<i>N</i><sub>kj</sub> is the number of wave <i>j</i> inside ring <i>k</i>, and <i>p</i><sub>kj</sub> is the ring's chance of
-killing one of them with one shot (0 if it can't engage them). Every shot, at a drone or
-a missile, comes out of the same stock <i>M</i><sub>k</sub>.
+<i>N</i><sub>kj</sub> is the number of wave <i>j</i> inside system <i>k</i>'s reach, and
+<i>p</i><sub>kj</sub> is the chance that one shot kills one of them (0 if the system
+can't, or won't, engage them). Every shot comes out of the same stock <i>M</i><sub>k</sub>.
+Guns and fighters fire at a steady rate <i>e</i><sub>kj</sub> while a target is in reach.
+Missile batteries instead fire a set number of interceptors at each target, two for most
+systems and one for upper-tier missile defence, which has time to look and fire again.
 
-| Ring | Range | Engages | Chance one shot kills | Interceptors |
-|---|---|---|---|---|
-| Fighters | 300–120 km | drones | 0.6 | unlimited |
-| Upper tier | 120–40 km | missiles | 0.8 | 70 |
-| Lower tier | 40–0 km | both | 0.7 | 90 |
+| System | Units | Where it fires | Engages | Interceptors | Cost per shot |
+|---|---|---|---|---|---|
+| Arrow 3 | 3 | 0–300 km | ballistic missiles | 72 | $3,000,000 |
+| Arrow 2 | 3 | 0–90 km | ballistic missiles | 72 | $3,000,000 |
+| Aegis destroyer (SM-3) | 2 | 0–300 km | ballistic missiles | 16 | $15,000,000 |
+| David's Sling | 1 | 0–300 km | cruise missiles, short-range ballistic missiles | 32 | $1,000,000 |
+| Iron Dome | 6 | 0–70 km | drones, cruise missiles | 360 | $50,000 |
+| F-35 | 4 | 40–300 km | drones, cruise missiles | 24 | $1,000,000 |
+| F-15 | 6 | 40–300 km | drones, cruise missiles | 60 | $400,000 |
 
-The drones fly at 185 km/h and arrive over an hour. The missiles fly at 7,000 km/h and
-arrive within six minutes, two hours after the first drones.
+The attackers are 170 Shahed-136 drones arriving over an hour, 30 Paveh cruise missiles
+and 120 Emad missiles arriving over twelve minutes, two hours after the first drones.
+The unit counts are illustrative, not Israel's real deployment.
 
-These numbers are made up to show the mechanism. There is too little public data on
-single strikes to fit them.
+```python
+from jomini import equipment as eq
+
+defense = eq.defense(
+    {
+        "Arrow 3": 3,
+        "Arrow 2": 3,
+        "Aegis destroyer (SM-3)": 2,
+        "David's Sling": 1,
+        "Iron Dome": 6,
+        "F-35": 4,
+        "F-15": 6,
+    }
+)
+missiles = [eq.wave("Emad", 120, launch_at=2.0, launch_window=0.2)]
+drones = [
+    eq.wave("Shahed-136", 170, launch_window=1.0),
+    eq.wave("Paveh", 30, launch_at=1.4, launch_window=0.3),
+]
+defense.strike(missiles)  # Emad: 28.7 of 120 through (23.9%)
+defense.strike(drones + missiles)  # ... Emad: 28.7 of 120 through (23.9%)
+```
 
 **Reproduce it**
 
@@ -183,8 +216,8 @@ NASAMS and a Patriot, and with nothing else to stop the drones they fire at them
 the bottom run the same batteries stand behind six Gepard guns, 30 mobile gun teams and
 ten teams of interceptor drones.
 
-Both defences are built from Jomini's equipment catalogue (below) and run on the same
-model as the strike above.
+Both defences are built from Jomini's equipment catalogue and run on the same model as
+the strike above.
 
 Alone, the missile batteries fire all 66 of their interceptors, worth $210 million, at
 drones worth $3.5 million. A third of the drones still get through, and so do all ten
