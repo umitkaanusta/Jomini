@@ -177,6 +177,8 @@ uv run python scripts/make_strike_gif.py
 
 ![Waterloo as fought: the French break around 7 pm and Napoleon wins 27 refights in 100. With half as many men again he wins 37](docs/waterloo.gif)
 
+**Note:** As a Napoleon admirer, I think he would have done better.
+
 Waterloo, 18 June 1815. Napoleon attacked with 68,000 men. Against him stood 138,000
 British, Dutch and Prussian troops, counted together. The top run replays the battle as
 fought. The bottom run gives Napoleon half as many men again: 102,000.
