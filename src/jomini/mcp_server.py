@@ -9,6 +9,7 @@ import functools
 import math
 import statistics
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Literal
 
 import numpy as np
@@ -83,7 +84,9 @@ Research workflow:
   war in Ukraine (Ukrainian General Staff claims; Oryx visually confirmed losses).
 - Time series: get_loss_series, effectiveness_trend (Kalman-smoothed relative
   effectiveness), loss_intensity (smoothed loss rate), fit_law_to_series.
-- Air defence: air_defense_raid simulates drone raids against a layered defence fitted
+- Air defence: air_defense_strike simulates mixed strikes (drones ahead of ballistic
+  or cruise missiles) against rings that share their interceptors; air_defense_raid
+  simulates drone raids against a layered defence fitted
   to Ukraine's nightly reports (or a generic fixed-capacity one: saturation, magazines,
   cost exchange); air_defense_saturation_test checks those reports for saturation.
 - Every result carries a "provenance" block; use cite with its cite_keys for BibTeX.
@@ -1145,6 +1148,130 @@ class AirDefenseLayer(BaseModel):
     engage_rate: float = Field(2.0, description="Shots per hour at a lone drone")
     magazine: float | None = Field(None, description="Shots in stock; omit for unlimited")
     cost_per_shot: float = Field(0.0, description="Dollars per shot")
+    pk_against: dict[str, float] | None = Field(
+        None,
+        description="For strikes: kill chance per shot against each wave by name "
+        "(0 = this ring can't engage that wave); other waves use pk",
+    )
+
+
+def _build_defense(layers: list[AirDefenseLayer]) -> Any:
+    from jomini.airdefense import AirDefense, Layer
+
+    if len(layers) > 10:
+        raise ToolError("at most 10 layers")
+    try:
+        return AirDefense(
+            tuple(
+                Layer(
+                    lay.name,
+                    lay.outer_km,
+                    lay.inner_km,
+                    pk=lay.pk,
+                    fire_rate=math.inf if lay.fire_rate is None else lay.fire_rate,
+                    engage_rate=lay.engage_rate,
+                    magazine=math.inf if lay.magazine is None else lay.magazine,
+                    cost_per_shot=lay.cost_per_shot,
+                    pk_against=lay.pk_against,
+                )
+                for lay in layers
+            )
+        )
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+
+
+class StrikeWave(BaseModel):
+    """One wave of a mixed strike."""
+
+    name: str = Field(description="e.g. 'drones', 'ballistic missiles', 'cruise missiles'")
+    size: float = Field(description="Number of attackers")
+    speed_kmh: float = Field(
+        description="Drones ~185, cruise missiles ~800, ballistic missiles ~7000"
+    )
+    launch_at_hours: float = Field(0.0, description="When the wave reaches 300 km out")
+    launch_window_hours: float = Field(0.0, description="Spread of arrivals (0 = together)")
+    unit_cost: float = Field(0.0, description="Dollars per attacker")
+
+
+@server.tool(annotations=_READ_ONLY)
+@_provenance("air_defense")
+def air_defense_strike(
+    waves: list[StrikeWave], layers: list[AirDefenseLayer] | None = None
+) -> dict[str, Any]:
+    """Simulate a mixed strike (drones, cruise and ballistic missiles in waves with
+    their own speeds and timing) against a layered defence whose rings share their
+    fire and interceptors among whatever is inside them. Shows how drones sent ahead
+    of missiles draw fire and use up interceptors.
+
+    Default defence (illustrative, not fitted): fighters 300-120 km (drones only), an
+    upper tier 120-40 km (ballistic missiles only, 70 interceptors), and a lower tier
+    40-0 km that engages both (90 interceptors). The default treats any wave whose name
+    contains "missile" as a missile. Pass ``layers`` with ``pk_against`` to design your
+    own. Returns how many of each wave got through and shots and kills per ring.
+    """
+    from jomini.airdefense import Wave, missile_defense
+
+    if not 1 <= len(waves) <= 6:
+        raise ToolError("give 1 to 6 waves")
+    try:
+        built = [
+            Wave(
+                w.name,
+                w.size,
+                w.speed_kmh,
+                launch_at=w.launch_at_hours,
+                launch_window=w.launch_window_hours,
+                unit_cost=w.unit_cost,
+                diffusion=50.0 if w.speed_kmh < 300 else 0.0,
+            )
+            for w in waves
+        ]
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    if any(w.size > 5000 or w.speed_kmh > 30_000 for w in waves):
+        raise ToolError("at most 5000 attackers and 30,000 km/h per wave")
+    if layers:
+        model = _build_defense(layers)
+    else:
+        base = missile_defense()
+        kinds = {w.name: ("missiles" if "missile" in w.name.lower() else "drones") for w in waves}
+        model = type(base)(
+            tuple(
+                replace(
+                    lay,
+                    pk_against={name: lay.pk_for(kind) for name, kind in kinds.items()},
+                )
+                for lay in base.layers
+            )
+        )
+    try:
+        result = model.strike(built)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from None
+    return {
+        "waves": [
+            {
+                "wave": name,
+                "launched": _round(float(la)),
+                "got_through": _round(float(lk)),
+                "share_through": _round(float(lk / la), 3),
+            }
+            for name, la, lk in zip(result.waves, result.launched, result.leaked, strict=True)
+        ],
+        "rings": [
+            {
+                "ring": ring,
+                "kills": {w: _round(float(k)) for w, k in zip(result.waves, kills, strict=True)},
+                "shots": _round(float(shots.sum())),
+                "interceptors_left": _round(float(left)),
+            }
+            for ring, kills, shots, left in zip(
+                result.layers, result.kills, result.shots, result.magazine_left, strict=True
+            )
+        ],
+        "defense": "custom" if layers else "illustrative",
+    }
 
 
 @server.tool(annotations=_READ_ONLY)
@@ -1179,7 +1306,7 @@ def air_defense_raid(
     show magazine depletion. Layer ranges and costs are placeholders, not any real
     order of battle; the Ukraine fit only pins down overall lethality and surge.
     """
-    from jomini.airdefense import AirDefense, Layer, generic_defense, ukraine_defense
+    from jomini.airdefense import generic_defense, ukraine_defense
 
     if not raid_sizes or any(s <= 0 or s > 5000 for s in raid_sizes):
         raise ToolError("raid_sizes must be 1 to 5000 attackers each")
@@ -1188,26 +1315,7 @@ def air_defense_raid(
     if not 1 <= nights <= 60:
         raise ToolError("nights must be 1 to 60")
     if layers:
-        if len(layers) > 10:
-            raise ToolError("at most 10 layers")
-        try:
-            model = AirDefense(
-                tuple(
-                    Layer(
-                        lay.name,
-                        lay.outer_km,
-                        lay.inner_km,
-                        pk=lay.pk,
-                        fire_rate=math.inf if lay.fire_rate is None else lay.fire_rate,
-                        engage_rate=lay.engage_rate,
-                        magazine=math.inf if lay.magazine is None else lay.magazine,
-                        cost_per_shot=lay.cost_per_shot,
-                    )
-                    for lay in layers
-                )
-            )
-        except ValueError as exc:
-            raise ToolError(str(exc)) from None
+        model = _build_defense(layers)
     elif defense == "ukraine":
         model = ukraine_defense()
     else:
