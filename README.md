@@ -43,45 +43,44 @@ city <-- missiles --|-- mobile guns --|-- interceptor drones --|<-- raid
 0 km              40 km            150 km                   300 km
 ```
 
-Let $u(x, t)$ be the number of drones per kilometre at distance $x$ from the city. They
-fly in at speed $v$ and spread out as they go. Ring $k$ kills them at rate $h_k$:
+Let <i>u</i>(<i>x</i>, <i>t</i>) be the number of drones per kilometre at distance <i>x</i> from the city. They
+fly in at speed <i>v</i> and spread out as they go. Ring <i>k</i> kills them at rate <i>h</i><sub>k</sub>:
 
-```math
-\frac{\partial u}{\partial t} = v\,\frac{\partial u}{\partial x} + D\,\frac{\partial^2 u}{\partial x^2} - \sum_k h_k\,\mathbf{1}[x \in \text{ring } k]\,u
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/eq/raid-dark.svg">
+  <img alt="du/dt = v du/dx + D d2u/dx2 - sum over rings of h_k u" src="docs/eq/raid-light.svg">
+</picture>
 
-Ring $k$ has $N_k$ drones inside it and fires $s_k$ shots an hour, until its stock $M_k$
+Ring <i>k</i> has <i>N</i><sub>k</sub> drones inside it and fires <i>s</i><sub>k</sub> shots an hour, until its stock <i>M</i><sub>k</sub>
 runs out:
 
-```math
-N_k = \int_{\text{ring } k} u\,dx, \qquad
-s_k = \frac{F_k\,e_k\,N_k}{F_k + e_k\,N_k}, \qquad
-h_k = \frac{p_k\,s_k}{N_k}, \qquad
-\frac{dM_k}{dt} = -s_k
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/eq/rings-dark.svg">
+  <img alt="N_k = drones in ring k; s_k = F_k e_k N_k / (F_k + e_k N_k); h_k = p_k s_k / N_k; dM_k/dt = -s_k" src="docs/eq/rings-light.svg">
+</picture>
 
-When a big raid is coming, the defence can be reinforced. For a raid of $R$ drones, $F_k$
-and $e_k$ are multiplied by $(R/100)^{\sigma}$. Drones that reach $x = 0$ get through.
+When a big raid is coming, the defence can be reinforced. For a raid of <i>R</i> drones, <i>F</i><sub>k</sub>
+and <i>e</i><sub>k</sub> are multiplied by (<i>R</i>/100)<sup>σ</sup>. Drones that reach <i>x</i> = 0 get through.
 
 | Symbol | Meaning |
 |---|---|
-| $v$ | Drone speed (185 km/h) |
-| $D$ | How fast the raid spreads out (50 km²/h) |
-| $p_k$ | Chance that one shot kills |
-| $e_k$ | How often a lone drone is shot at (shots per hour) |
-| $F_k$ | The most shots the ring can fire in an hour |
-| $M_k$ | Shots left in stock |
-| $\sigma$ | Surge: how much the defence is reinforced for big raids |
+| <i>v</i> | Drone speed (185 km/h) |
+| <i>D</i> | How fast the raid spreads out (50 km²/h) |
+| <i>p</i><sub>k</sub> | Chance that one shot kills |
+| <i>e</i><sub>k</sub> | How often a lone drone is shot at (shots per hour) |
+| <i>F</i><sub>k</sub> | The most shots the ring can fire in an hour |
+| <i>M</i><sub>k</sub> | Shots left in stock |
+| σ | Surge: how much the defence is reinforced for big raids |
 
 **What it means**
 
-- **Few drones:** every drone runs the same risk, $h_k = p_k e_k$. Numbers don't help the
+- **Few drones:** every drone runs the same risk, <i>h</i><sub>k</sub> = <i>p</i><sub>k</sub> <i>e</i><sub>k</sub>. Numbers don't help the
   attacker.
-- **Many drones:** the ring fires flat out, so each drone's risk falls as $p_k F_k / N_k$.
+- **Many drones:** the ring fires flat out, so each drone's risk falls as <i>p</i><sub>k</sub> <i>F</i><sub>k</sub>/<i>N</i><sub>k</sub>.
   Numbers swamp the defence.
 
 So a defence that can't reinforce lets a bigger share through as raids grow. If big raids
-leak a smaller share, the defence must be reinforcing ($\sigma > 0$).
+leak a smaller share, the defence must be reinforcing (σ > 0).
 
 **Fitted to Ukraine's data**
 
@@ -93,9 +92,9 @@ with the typical raid that month (125 drones).
 | Parameter | Estimate |
 |---|---|
 | Chance one shot kills (drones, guns, missiles) | 0.63, 0.32, 0.90 |
-| Surge, $\sigma$ | 0.19: when a raid doubles, each drone is shot at 14% more often |
-| Most shots per hour, $F_k$ | never reached on a typical night |
-| Stock, $M_k$ | doesn't run out within a night |
+| Surge, σ | 0.19: when a raid doubles, each drone is shot at 14% more often |
+| Most shots per hour, <i>F</i><sub>k</sub> | never reached on a typical night |
+| Stock, <i>M</i><sub>k</sub> | doesn't run out within a night |
 
 | Raid size | Got through (data) | Model |
 |---|---|---|
@@ -140,19 +139,18 @@ lower tier's interceptors before the missiles arrive.
 <details>
 <summary>The equations and the numbers</summary>
 
-Each wave $j$ (drones, missiles) has its own density $u_j(x, t)$ and speed $v_j$, and
-follows the same equation as the drone raid. Ring $k$ fires at all the waves it can
+Each wave <i>j</i> (drones, missiles) has its own density <i>u</i><sub>j</sub>(<i>x</i>, <i>t</i>) and speed <i>v</i><sub>j</sub>, and
+follows the same equation as the drone raid. Ring <i>k</i> fires at all the waves it can
 engage and splits its shots between them:
 
-```math
-s_{kj} = \frac{F_k\,e_k\,N_{kj}}{F_k + e_k \sum_i N_{ki}}, \qquad
-h_{kj} = \frac{p_{kj}\,s_{kj}}{N_{kj}}, \qquad
-\frac{dM_k}{dt} = -\sum_j s_{kj}
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/eq/strike-dark.svg">
+  <img alt="s_kj = F_k e_k N_kj / (F_k + e_k sum_i N_ki); h_kj = p_kj s_kj / N_kj; dM_k/dt = -sum_j s_kj" src="docs/eq/strike-light.svg">
+</picture>
 
-$N_{kj}$ is the number of wave $j$ inside ring $k$, and $p_{kj}$ is the ring's chance of
+<i>N</i><sub>kj</sub> is the number of wave <i>j</i> inside ring <i>k</i>, and <i>p</i><sub>kj</sub> is the ring's chance of
 killing one of them with one shot (0 if it can't engage them). Every shot, at a drone or
-a missile, comes out of the same stock $M_k$.
+a missile, comes out of the same stock <i>M</i><sub>k</sub>.
 
 | Ring | Range | Engages | Chance one shot kills | Interceptors |
 |---|---|---|---|---|
@@ -195,17 +193,18 @@ again he wins 37. More men help, but he still loses most of the time.
 <details>
 <summary>The equations and the numbers</summary>
 
-$R$ and $B$ are the French and allied armies. Each side's losses grow with both armies'
+<i>R</i> and <i>B</i> are the French and allied armies. Each side's losses grow with both armies'
 sizes:
 
-```math
-\frac{dR}{dt} = -\beta\,R\,B, \qquad \frac{dB}{dt} = -\rho\,R\,B
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/eq/waterloo-dark.svg">
+  <img alt="dR/dt = -beta R B; dB/dt = -rho R B" src="docs/eq/waterloo-light.svg">
+</picture>
 
 Fitted to the real casualties (25,000 French, 22,500 allied in half a day), a French
-soldier was 0.9 times as deadly as an allied one ($\rho / \beta$).
+soldier was 0.9 times as deadly as an allied one (ρ/β).
 
-An army breaks once it has lost a share $b$ of its men, where $\log b$ is normally
+An army breaks once it has lost a share <i>b</i> of its men, where log <i>b</i> is normally
 distributed. Fitted to 660 battles, the median for 1815 is 25% for an attacker and 27%
 for a defender. Each refight draws new breaking points for both sides.
 
