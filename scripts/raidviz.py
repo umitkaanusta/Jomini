@@ -1,10 +1,11 @@
 """Shared drawing for the README's air-defence animations.
 
-Each panel shows the sky from the target (left) out to the edge of the airspace, the
-attackers flying in, one labelled bar per defending system showing where it fires, kills
-flashing in that system's colour, and live counters of what got through and what the
-defence has spent. Dots follow the model: each step, an attacker inside a system's band
-is killed with the probability the model gives for that step.
+Each panel shows the sky from the target (left) out to the edge of the airspace, with a
+shaded band for where each system fires (systems with the same reach share a band, and
+overlapping bands stack), the attackers flying in, kills flashing in the colour of the
+band that made them, and live counters of what got through and what the defence spent.
+Dots follow the model: each step, an attacker inside a system's band is killed with the
+probability the model gives for that step.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from jomini.airdefense import AirDefense, Wave, _StrikeState
 
-W, PAD_L, PAD_R, SKY, BAR = 760, 165, 20, 120, 15
+W, PAD_L, PAD_R, SKY = 760, 70, 20, 150
 BG, SKY_BG, INK, MUTE, LEAK = (
     (250, 250, 247),
     (238, 240, 240),
@@ -73,6 +74,23 @@ class Panel:
             for _ in range(round(w.size))
         ]
         self.flash: list[list[float]] = []
+        # Systems with the same reach share one shaded band.
+        bands: list[tuple[float, float]] = []
+        for lay in self.defense.layers:
+            if (lay.inner, lay.outer) not in bands:
+                bands.append((lay.inner, lay.outer))
+        bands.sort(key=lambda b: (b[0], -b[1]))
+        self.bands = bands
+        self.band_of = [bands.index((lay.inner, lay.outer)) for lay in self.defense.layers]
+        self.label_row: list[int] = []
+        self.band_labels = [
+            ", ".join(
+                self.labels.get(lay.name, lay.name)
+                for lay, b in zip(self.defense.layers, self.band_of, strict=True)
+                if b == k
+            )
+            for k in range(len(bands))
+        ]
 
     def spent(self) -> float:
         lays = self.s.defense.layers
@@ -124,12 +142,29 @@ def render(
     """Animate the panels into a GIF. Time runs at ``slow_step`` hours per frame, and at
     ``fast_step`` while a fast attacker is in the air or ``busy(t)`` is true."""
     f_small, f_big = font(12), font(16)
-    heights = [46 + SKY + 8 + BAR * len(p.defense.layers) + 10 for p in panels]
+    heights = [46 + SKY + 12 for p in panels]
     H = sum(heights) + 24
     km = max(p.km for p in panels)
 
     def X(x: float) -> float:
         return PAD_L + x / km * (W - PAD_L - PAD_R)
+
+    # Label rows: each band's label goes on the first row where it doesn't collide.
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    for p in panels:
+        taken: list[list[tuple[float, float]]] = []
+        p.label_row = []
+        for (inner, _), label in zip(p.bands, p.band_labels, strict=True):
+            x0 = X(inner) + 5
+            x1 = x0 + measure.textlength(label, font=f_small) + 8
+            row = next(
+                (r for r, spans in enumerate(taken) if all(x1 <= a or x0 >= b for a, b in spans)),
+                len(taken),
+            )
+            if row == len(taken):
+                taken.append([])
+            taken[row].append((x0, x1))
+            p.label_row.append(row)
 
     frames = []
     t = 0.0
@@ -148,6 +183,11 @@ def render(
                 return top + 4 + v * (SKY - 8)
 
             g.rectangle([X(0), sky_top, X(p.km - 8), sky_bot], fill=SKY_BG)
+            for k, (inner, outer) in enumerate(p.bands):
+                colour = PALETTE[k % len(PALETTE)]
+                g.rectangle([X(inner), sky_top, X(outer), sky_bot], fill=(*colour, 34))
+                ly = sky_top + 4 + 14 * p.label_row[k]
+                g.text((X(inner) + 5, ly), p.band_labels[k], fill=colour, font=f_small)
             for dx_, h in ((0, 18), (8, 30), (16, 12)):
                 g.rectangle([X(0) - 40 + dx_, sky_bot - h, X(0) - 34 + dx_, sky_bot], fill=INK)
             for j, x, y, state in p.dots:
@@ -169,20 +209,13 @@ def render(
                     r = 3 + age * 1.5
                     g.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(*LEAK, a))
                 else:
-                    c = (*PALETTE[int(i) % len(PALETTE)], a)
+                    c = (*PALETTE[p.band_of[int(i)] % len(PALETTE)], a)
                     g.line([cx - 4, cy - 4, cx + 4, cy + 4], fill=c, width=2)
                     g.line([cx - 4, cy + 4, cx + 4, cy - 4], fill=c, width=2)
                 fl[3] += 1
                 if fl[3] < 7:
                     keep.append(fl)
             p.flash = keep
-            for i, lay in enumerate(p.defense.layers):
-                by = sky_bot + 8 + i * BAR
-                colour = PALETTE[i % len(PALETTE)]
-                g.rectangle([X(lay.inner), by + 3, X(lay.outer), by + BAR - 3], fill=colour)
-                label = p.labels.get(lay.name, lay.name)
-                g.text((PAD_L - 8 - g.textlength(label, font=f_small), by), label, fill=INK,
-                       font=f_small)  # fmt: skip
             g.text((12, y0 + 4), p.title, fill=INK, font=f_big)
             parts = [
                 f"{p.short.get(w.name, w.name)} through {lk:.0f}/{w.size:.0f}"
