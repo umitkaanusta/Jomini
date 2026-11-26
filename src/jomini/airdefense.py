@@ -168,19 +168,23 @@ class AirDefense:
 
     :param diffusion: Spreading of the raid, km^2/h (0 keeps it a tight column).
     :param dx: Grid spacing in km.
+    :param edge: Distance from the target, km, where attackers enter the airspace.
+        Default 0: just beyond the furthest-reaching layer. Set it (e.g. 300) to compare
+        defences of different reach against the same strike.
     """
 
     layers: tuple[Layer, ...]
     speed: float = 185.0
     diffusion: float = 50.0
     dx: float = 2.0
+    edge: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.layers:
             raise ValueError("need at least one layer")
         if len({layer.name for layer in self.layers}) != len(self.layers):
             raise ValueError("layer names must be unique")
-        if self.speed <= 0 or self.diffusion < 0 or self.dx <= 0:
+        if self.speed <= 0 or self.diffusion < 0 or self.dx <= 0 or self.edge < 0:
             raise ValueError("speed and dx must be positive, diffusion non-negative")
 
     def raid(
@@ -313,7 +317,7 @@ def _simulate(
 ) -> RaidResult:
     layers = defense.layers
     v, diff, dx = defense.speed, defense.diffusion, defense.dx
-    extent = max(layer.outer for layer in layers) + 4 * dx
+    extent = max(defense.edge, *(layer.outer for layer in layers)) + 4 * dx
     n = math.ceil(extent / dx)
     centres = (np.arange(n) + 0.5) * dx
     masks = [(centres >= lay.inner) & (centres < lay.outer) for lay in layers]
@@ -446,7 +450,8 @@ class _StrikeState:
         self.defense, self.waves = defense, tuple(waves)
         layers, dx = defense.layers, defense.dx
         self.dx = dx
-        self.n = math.ceil((max(lay.outer for lay in layers) + 4 * dx) / dx)
+        reach = max(defense.edge, *(lay.outer for lay in layers))
+        self.n = math.ceil((reach + 4 * dx) / dx)
         self.extent = self.n * dx
         centres = (np.arange(self.n) + 0.5) * dx
         self.masks = [(centres >= lay.inner) & (centres < lay.outer) for lay in layers]

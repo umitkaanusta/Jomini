@@ -173,6 +173,68 @@ uv run python scripts/make_strike_gif.py
 
 </details>
 
+## Cheap guns protect expensive missiles
+
+![The same strike against missile batteries alone, and behind cheap guns and interceptor drones](docs/cheap-layers.gif)
+
+A hundred Shahed drones fly at a city over an hour and a half. Ten Iskander ballistic
+missiles follow an hour later. In the top run the city has only missile batteries, a
+NASAMS and a Patriot, and with nothing else to stop the drones they fire at them too. In
+the bottom run the same batteries stand behind six Gepard guns, 30 mobile gun teams and
+ten teams of interceptor drones.
+
+Both defences are built from Jomini's equipment catalogue (below) and run on the same
+model as the strike above.
+
+Alone, the missile batteries fire all 66 of their interceptors, worth $210 million, at
+drones worth $3.5 million. A third of the drones still get through, and so do all ten
+Iskanders. Behind the cheap layers almost no drone gets through, the batteries still
+have 14 interceptors when the missiles arrive, and six Iskanders in ten are stopped.
+
+<details>
+<summary>The code and the numbers</summary>
+
+```python
+from jomini import equipment as eq
+from jomini.airdefense import AirDefense
+
+strike = [
+    eq.wave("Shahed-136", 100, launch_window=1.5),
+    eq.wave("Iskander-M", 10, launch_at=2.5, launch_window=0.05),
+]
+batteries = [eq.layer("NASAMS", targets="all"), eq.layer("Patriot PAC-3", targets="all")]
+cheap = [
+    eq.layer("Gepard", 6),
+    eq.layer("mobile gun team", 30),
+    eq.layer("interceptor drone team", 10),
+]
+
+AirDefense(tuple(batteries), edge=300).strike(strike)
+# Shahed-136: 34.7 of 100 through (34.7%); Iskander-M: 10.0 of 10 through (100.0%)
+AirDefense((*batteries, *cheap), edge=300).strike(strike)
+# Shahed-136: 0.5 of 100 through (0.5%); Iskander-M: 3.8 of 10 through (37.8%)
+```
+
+`targets="all"` makes the batteries fire at drones too. By default, medium- and
+long-range missile systems hold fire on slow drones and leave them to cheaper weapons.
+
+| System | Where it fires | Shots | Cost per shot |
+|---|---|---|---|
+| NASAMS | 0–40 km | 18 | $1,000,000 |
+| Patriot PAC-3 | 0–60 km | 48 | $4,000,000 |
+| Gepard (×6) | 0–40 km | 30 bursts each | $3,000 |
+| Mobile gun team (×30) | 0–150 km, along the routes | unlimited | $300 |
+| Interceptor drone team (×10) | 10–150 km | 10 each | $3,000 |
+
+**Reproduce it**
+
+```bash
+uv sync --all-extras
+uv run python scripts/make_layers_gif.py
+```
+
+</details>
+
 ## Waterloo, with a bigger French army
 
 ![Waterloo as fought: the French break around 7 pm and Napoleon wins 27 refights in 100. With half as many men again he wins 37](docs/waterloo.gif)
@@ -241,13 +303,20 @@ print(eq.defense(city).strike(strike))
 # Iskander-M: 5.4 of 8 through (68.0%)
 ```
 
-The catalogue has 102 attackers (drones, cruise, ballistic and hypersonic
-missiles, glide bombs, rockets, strike aircraft) and 77 defences (guns,
-interceptor drones, jamming, fighters, lasers, and short-, medium- and long-range
-missile systems). Speeds, ranges, magazine sizes and costs are rounded public figures.
-Kill chances aren't public: they are rough defaults for each class of system, tuned so
-that a Ukraine-like city defence stops the share of drones and cruise missiles that
-Ukraine reports. Treat them as illustrative, not as any system's real performance.
+The catalogue has 102 attackers (drones, cruise, ballistic and hypersonic missiles, glide
+bombs, rockets, strike aircraft) and 77 defences (guns, interceptor drones, jamming,
+fighters, lasers, and short-, medium- and long-range missile systems). Speeds, ranges,
+magazine sizes and costs are rounded public figures.
+
+> **How far to trust the numbers.** Kill chances aren't public. They are rough defaults
+> for each class of system, not any system's real performance. Kill chances against
+> drones and cruise missiles are tuned so that a Ukraine-like city defence stops the
+> share Ukraine reports (87% and 78%). Ballistic missiles aren't tuned: Ukraine stops
+> about a quarter of them nationally, but most hit places without Patriot cover, so that
+> figure is about coverage, not about Patriot. Strikes like Iran's on Israel come out
+> worse for the defender than they really were. The model doesn't know that many
+> missiles fail on their own, or that defenders let missiles heading for empty ground
+> fall.
 
 <details>
 <summary>Attackers</summary>

@@ -554,4 +554,4 @@ def defense(units: Mapping[str, float]) -> AirDefense:
     """A defence from ``{name: count}``, e.g. ``{"Patriot PAC-3": 2, "Gepard": 6}``."""
     if not units:
         raise ValueError("need at least one defence")
-    return AirDefense(tuple(layer(name, count) for name, count in units.items()))
+    return AirDefense(tuple(layer(name, count) for name, count in units.items()), edge=EDGE_KM)

@@ -79,3 +79,26 @@ def test_layer_options() -> None:
         eq.layer("F-16", 0)
     with pytest.raises(ValueError):
         eq.defense({})
+
+
+def test_same_airspace_whatever_the_defence() -> None:
+    # Attackers enter 300 km out for catalogue defences, so a short-range defence
+    # doesn't make the strike start closer.
+    short, long = eq.defense({"Gepard": 1}), eq.defense({"F-16": 1})
+    wave = [eq.wave("Shahed-136", 10)]
+    assert short.edge == long.edge == 300
+    assert eq.AirDefense(short.layers).strike(wave).launched[0] == 10
+    with pytest.raises(ValueError):
+        eq.AirDefense(short.layers, edge=-1)
+
+
+def test_cheap_layers_save_the_batteries() -> None:
+    strike = [
+        eq.wave("Shahed-136", 100, launch_window=1.5),
+        eq.wave("Iskander-M", 10, launch_at=2.5, launch_window=0.05),
+    ]
+    batteries = [eq.layer("NASAMS", targets="all"), eq.layer("Patriot PAC-3", targets="all")]
+    cheap = [eq.layer("Gepard", 6), eq.layer("mobile gun team", 30)]
+    alone = eq.AirDefense(tuple(batteries), edge=300).strike(strike)
+    behind = eq.AirDefense((*batteries, *cheap), edge=300).strike(strike)
+    assert alone.leak_fraction("Iskander-M") > 0.9 > 0.6 > behind.leak_fraction("Iskander-M")
