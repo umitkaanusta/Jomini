@@ -128,3 +128,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 bench/results/
+
+# Third-party data that must not be redistributed (e.g. the Iran salvo OSINT database)
+*.db
+*.sqlite
+data/private/
