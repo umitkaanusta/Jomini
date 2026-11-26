@@ -354,6 +354,17 @@ def test_air_defense_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fitted["defense"] == "ukraine" and fitted["surge"] == pytest.approx(0.19)
     shares = [r["leak_fraction"] for r in fitted["raids"]]
     assert shares[0] > shares[1] > shares[2] and 0.1 < shares[1] < 0.2
+    rings = [
+        {"name": "Patriot", "outer_km": 40, "inner_km": 0, "pk": 0.85, "fire_rate": 20,
+         "magazine": 60, "cost_per_shot": 4_000_000},
+        {"name": "guns", "outer_km": 120, "inner_km": 40, "pk": 0.3},
+    ]  # fmt: skip
+    custom = call("air_defense_raid", raid_sizes=[50, 400], layers=rings)
+    assert custom["defense"] == "custom"
+    assert [x["layer"] for x in custom["raids"][0]["layers"]] == ["Patriot", "guns"]
+    assert custom["raids"][1]["leak_fraction"] > custom["raids"][0]["leak_fraction"]
+    with pytest.raises(ToolError):
+        call("air_defense_raid", raid_sizes=[50], layers=[{**rings[0], "inner_km": 50}])
     with pytest.raises(ToolError):
         call("air_defense_raid", raid_sizes=[])
 

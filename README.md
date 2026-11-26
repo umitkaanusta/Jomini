@@ -3,33 +3,42 @@
 [![CI](https://github.com/umitkaanusta/Jomini/actions/workflows/ci.yml/badge.svg)](https://github.com/umitkaanusta/Jomini/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Jomini simulates drone raids against layered air defence and fits the model to what
-happens over Ukraine each night. It also measures how violence feeds on itself in a war,
-tracks how each side's effectiveness changes over time, and holds data on 660 historical
-battles. You can use it from Python, or give it to Claude as a set of tools.
+**Simulate battles from the musket to the drone.**
 
-The package on PyPI is out of date. I'll update it soon. Until then, clone the repository,
-or run Jomini as an MCP server straight from GitHub (see [below](#use-it-from-claude)).
+Jomini provides models of attrition and escalation, and lets you fit them to historical
+battles and, where data exists, to wars still being fought.
 
-## Demo: a Shahed raid on Ukraine
+It also runs as an [MCP server for your AI agents](#use-it-from-claude). The Python package
+on PyPI is out of date; I'll update it once my PyPI account is unblocked.
 
-### 1. Run a raid
+We don't celebrate or glorify war or any other violence. Jomini is for studying how wars
+are fought today and how they were fought in the past.
+
+## Simulating a drone raid
+
+![Two raids flying through three rings of air defence: 24% of a 30-drone raid gets through, 9% of a 500-drone raid](docs/raid.gif)
+
+Two night-time drone raids on a city defended by three rings: interceptor drones, mobile
+gun teams and surface-to-air missiles. The model comes from Randow et al. (2026). We
+fitted it to the Ukrainian Air Force's nightly reports from September 2024 to November
+2026. A quarter of the 30-drone raid gets through. Of the 500-drone raid, less than a tenth
+does.
+
+### How it's done
 
 ```python
 from jomini.airdefense import ukraine_defense
 
-defense = ukraine_defense()  # fitted to Ukraine's nightly reports, Sep 2024 to Nov 2026
-print(defense.raid(125))  # a typical night
-# 125 launched, 19.3 leaked (15.4%); interceptors 82 kills/130 shots,
-# mobile guns 14 kills/44 shots, missiles 10 kills/11 shots
-
-defense.raid(30).leak_fraction  # 0.24
-defense.raid(500).leak_fraction  # 0.088
+defense = ukraine_defense()  # the defence fitted to Ukraine's reports
+print(defense.raid(30))
+# 30 launched, 7.2 leaked (24.0%); interceptors 17 kills/27 shots,
+# mobile guns 3 kills/11 shots, missiles 3 kills/3 shots
+print(defense.raid(500))
+# 500 launched, 43.8 leaked (8.8%); interceptors 376 kills/596 shots,
+# mobile guns 50 kills/157 shots, missiles 30 kills/34 shots
 ```
 
-Send four times as many drones and a smaller share gets through.
-
-You can build your own defence and fight it night after night:
+Or bring your own equipment:
 
 ```python
 from jomini.airdefense import AirDefense, Layer
@@ -39,52 +48,41 @@ guns = Layer("mobile guns", 150, 40, pk=0.3, fire_rate=100, engage_rate=2)
 patriot = Layer("Patriot", 40, 0, pk=0.85, fire_rate=20, engage_rate=2, magazine=60)
 defense = AirDefense((drones, guns, patriot))
 
-defense.raid(300, launch_window=2.0)  # 300 drones launched over two hours: 58% get through
+defense.raid(300).leak_fraction  # 0.69: this defence is swamped
 
-camp = defense.campaign([300] * 10, restock={"Patriot": 4, "interceptor drones": 30})
-camp.empty_after("Patriot")  # 3: the Patriots run out of missiles after the fourth night
-camp.leak_fraction  # 69% get through on the first night, 83% from the seventh
+nights = defense.campaign([300] * 10, restock={"Patriot": 4, "interceptor drones": 30})
+nights.empty_after("Patriot")  # 3: the Patriots run out of missiles after night four
 ```
 
-### 2. The equations
+### The equations
 
-The drones fly in from 300 km out, through three rings of defence, toward the target:
+Each ring is one kind of equipment, with its own range, chance to kill, rate of fire,
+stock of ammunition and cost per shot. In the demo:
 
 ```
-target <-- missiles --|-- mobile guns --|-- interceptors --|<-- raid
-  0 km              40 km            150 km             300 km
+city <-- missiles --|-- mobile guns --|-- interceptor drones --|<-- raid
+0 km              40 km            150 km                   300 km
 ```
 
-Let $u(x, t)$ be the number of drones per kilometre at distance $x$ from the target. They
-fly in at speed $v$ and spread out as they go:
+Let $u(x, t)$ be the number of drones per kilometre at distance $x$ from the city. They
+fly in at speed $v$ and spread out as they go. Ring $k$ kills them at rate $h_k$:
 
 ```math
-\frac{\partial u}{\partial t} = v\,\frac{\partial u}{\partial x} + D\,\frac{\partial^2 u}{\partial x^2} - \sum_k h_k(t)\,\mathbf{1}[x \in \text{ring } k]\,u
+\frac{\partial u}{\partial t} = v\,\frac{\partial u}{\partial x} + D\,\frac{\partial^2 u}{\partial x^2} - \sum_k h_k\,\mathbf{1}[x \in \text{ring } k]\,u
 ```
 
-Ring $k$ sees $N_k$ drones and fires $s_k$ shots an hour. Each drone in the ring is killed
-at rate $h_k$:
+Ring $k$ has $N_k$ drones inside it and fires $s_k$ shots an hour, until its stock $M_k$
+runs out:
 
 ```math
-N_k(t) = \int_{\text{ring } k} u\,dx, \qquad
+N_k = \int_{\text{ring } k} u\,dx, \qquad
 s_k = \frac{F_k\,e_k\,N_k}{F_k + e_k\,N_k}, \qquad
-h_k = \frac{p_k\,s_k}{N_k}
-```
-
-Every shot comes out of the ring's stock, and the ring falls silent when the stock is gone:
-
-```math
+h_k = \frac{p_k\,s_k}{N_k}, \qquad
 \frac{dM_k}{dt} = -s_k
 ```
 
-A ring can be reinforced when a big raid is coming. For a raid of $R$ drones, its firing
-rates are multiplied by
-
-```math
-F_k,\ e_k \;\to\; \left(\frac{R}{100}\right)^{\sigma} F_k,\ \left(\frac{R}{100}\right)^{\sigma} e_k
-```
-
-Drones that reach $x = 0$ get through.
+When a big raid is coming, the defence can be reinforced. For a raid of $R$ drones, $F_k$
+and $e_k$ are multiplied by $(R/100)^{\sigma}$. Drones that reach $x = 0$ get through.
 
 | Symbol | Meaning |
 |---|---|
@@ -96,116 +94,74 @@ Drones that reach $x = 0$ get through.
 | $M_k$ | Shots left in stock |
 | $\sigma$ | Surge: how much the defence is reinforced for big raids |
 
-This follows Randow et al. (2026), cut down to one dimension.
+### What it means
 
-### 3. What it means
+- **Few drones:** every drone runs the same risk, $h_k = p_k e_k$. Numbers don't help the
+  attacker.
+- **Many drones:** the ring fires flat out, so each drone's risk falls as $p_k F_k / N_k$.
+  Numbers swamp the defence.
 
-The shots formula has two regimes.
+So a defence that can't reinforce lets a bigger share through as raids grow. If big raids
+leak a smaller share, the defence must be reinforcing ($\sigma > 0$).
 
-- **Few drones.** The ring has time for all of them: $s_k \approx e_k N_k$, so every drone
-  runs the same risk, $h_k = p_k e_k$. Numbers don't help the attacker.
-- **Many drones.** The ring fires as fast as it can: $s_k \approx F_k$, so each drone's
-  risk falls as $h_k = p_k F_k / N_k$. Numbers swamp the defence. This is saturation.
+### Fitted to Ukraine's data
 
-That leads to a firm rule. If a drone's risk can only fall as more drones arrive (crews
-that can't keep up, missiles that run out), the share that gets through can only rise
-with the size of the raid. The proof is in the module docstring, and a property test
-checks it on the model. Only surge ($\sigma > 0$) can make big raids leak a smaller share.
-
-With no limit on firing and no stock to run out, the model has a closed form. A drone
-spends $w_k / v$ hours crossing a ring $w_k$ km wide, so the share that gets through is
-
-```math
-\text{share through} = \exp\!\left[-\lambda \left(\frac{R}{100}\right)^{\sigma}\right],
-\qquad \lambda = \sum_k \frac{p_k\, e_k\, w_k}{v}
-```
-
-For the Ukraine fit, $\lambda = 1.79$ and $\sigma = 0.19$. This matches the full simulation
-to three decimal places.
-
-![Two raids flying through the three rings of the Ukraine-fitted defence: 24% of a 30-drone raid gets through, 9% of a 500-drone raid](docs/raid.gif)
-
-Two raids against the defence fitted to Ukraine. A quarter of the small raid gets through.
-Of the big raid, less than a tenth does.
-
-### 4. Fitted to Ukraine's data
-
-The Ukrainian Air Force reports each night how many drones were launched and how many were
-stopped. `data.ukraine_air_raids()` fetches these reports, compiled by Petro Ivaniuk on
-Kaggle (CC BY-NC-SA 4.0, so Jomini fetches them at run time and never ships them). The fit
-uses the 778 nights with at least five Shahed-type drones launched, from September 2024 to
-November 2026. It groups nights by raid size compared with the typical raid that month
-(125 drones), so a month of heavy raids doesn't get confused with a big raid.
+Each night the Ukrainian Air Force reports how many drones were launched and how many
+were stopped. Jomini downloads these reports, compiled by Petro Ivaniuk, when you use
+them. The fit uses 778 nights with at least five drones launched, and compares each night
+with the typical raid that month (125 drones).
 
 | Parameter | Estimate |
 |---|---|
-| Kill chance per shot, $p_k$ (interceptors, guns, missiles) | 0.63, 0.32, 0.90 |
-| Surge, $\sigma$ | 0.19 |
-| Firing capacity, $F_k$ | never reached on a typical night (set to unlimited) |
+| Chance one shot kills (drones, guns, missiles) | 0.63, 0.32, 0.90 |
+| Surge, $\sigma$ | 0.19: when a raid doubles, each drone is shot at 14% more often |
+| Most shots per hour, $F_k$ | never reached on a typical night |
 | Stock, $M_k$ | doesn't run out within a night |
-| Overall lethality, $\lambda$ | 1.79 |
 
 | Raid size | Got through (data) | Model |
 |---|---|---|
 | ¼ of typical | 16.5% | 23.5% |
 | ½ | 19.7% | 19.2% |
-| ¾ | 18.3% | 17.2% |
 | typical | 16.1% | 15.5% |
-| 1⅓× | 13.1% | 13.9% |
 | 2× | 11.2% | 11.9% |
 | 4× | 8.5% | 8.5% |
 
-The model is off by 1.5 percentage points on average. It overstates leakage on the
-smallest raids.
+The model is off by 1.5 percentage points on average, and too high on the smallest
+raids. Before autumn 2024 big raids did not leak a smaller share.
 
-A surge of 0.19 means that when a raid doubles, each drone is shot at about 14% more
-often. Before autumn 2024 there is no sign of this. `saturation_test` checks it directly
-against nights in the same month:
+Two warnings. The reports say only how many drones were stopped, not which ring stopped
+them, so only overall lethality and surge are really estimated; the split between rings is
+a guess. And these are Ukraine's own figures, which count decoys that never arrive as
+stopped.
 
-| Nights (5+ launched) | Change in log-odds of being stopped when the raid doubles (95% CI) |
-|---|---|
-| Shahed, Sep 2022 to Aug 2024 | −0.13 (−0.28 to +0.02) |
-| Shahed, Sep 2024 to Sep 2025 | **+0.32** (+0.25 to +0.40) |
-| Shahed, Oct 2025 to Nov 2026 | **+0.35** (+0.30 to +0.41) |
-| Cruise missiles, 2022 to 2026 | **+0.24** (+0.10 to +0.39) |
-| Ballistic missiles, 2022 to 2026 | +0.41 (−0.04 to +0.87) |
-
-What the fit can't tell you:
-
-- The reports give only launched and stopped. They don't say which ring made the kill, so
-  the data fix only the overall lethality $\lambda$ and the surge $\sigma$. The ring
-  ranges, costs and the split of kills between rings are placeholders.
-- These are Ukraine's own figures. Russia began launching decoys in large numbers in
-  autumn 2024, and decoys that never arrive count as stopped.
-- The fit can't tell real surge apart from decoys making up more of bigger raids, from
-  route planning, or from how the numbers are reported.
-
-`scripts/fit_ukraine_defense.py` reproduces the fit, and `scripts/make_raid_gif.py` draws the
+`scripts/fit_ukraine_defense.py` reproduces the fit. `scripts/make_raid_gif.py` draws the
 animation.
+
+## What it lacks
+
+- **Space.** No maps, terrain or routes. The raid model knows only how far each drone is
+  from its target.
+- **Everything but attrition.** No manoeuvre, morale, command, supply or weather, except
+  that a side can break after heavy losses.
+- **Real orders of battle.** Ranges, weapon numbers and costs are placeholders.
+- **Decoys and jamming.** They show up only as drones that never arrive.
+- **Forecasts.** The fits describe what happened. They don't predict what will.
 
 ## Other models
 
-- **Escalation** (`jomini.escalation`): measures how much violence in a war feeds on
-  itself, from the UCDP event data (about 418,000 events since 1989). In Russia–Ukraine,
-  each event sets off 0.69 more on average; in Sudan, 0.23.
-- **Effectiveness over time** (`jomini.dynamics`): tracks how many losses each side takes
-  per enemy loss, period by period, with error bands, from Oryx's photo-confirmed
-  equipment losses.
-- **Historical battles** (`jomini.cdb90`, `jomini.research`, `jomini.stochastic`): 660
-  land battles from 1600 to 1982, each with strengths, losses, commanders and a written
-  account. Jomini fits attrition models to them, tests which factors made armies deadlier,
-  and estimates each side's chance of winning from how much loss armies took before they
-  broke.
-- **Missile exchanges** (`jomini.modern`): Hughes' salvo model for fleets and missile duels.
-- **Data loaders** (`jomini.data`): Ukrainian General Staff loss claims, Oryx, UCDP, daily
-  data for Kursk 1943, and 63 American Civil War battles.
+- **Escalation:** how much violence in a war feeds on itself, from UCDP's 418,000 events
+  since 1989. In Russia–Ukraine each event sets off 0.69 more on average; in Sudan, 0.23.
+- **Effectiveness over time:** how many losses each side takes for each enemy loss, period
+  by period, from Oryx's photo-confirmed equipment losses.
+- **Historical battles:** 660 land battles from 1600 to 1982 with strengths, losses,
+  commanders and a written account of each. Fit attrition models to them, find what made
+  armies deadlier, and estimate each side's chance of winning.
+- **Missile exchanges:** Hughes' salvo model for fleets and missile duels.
 
 ## Use it from Claude
 
-Jomini runs as an [MCP](https://modelcontextprotocol.io) server, so Claude and other AI
-agents can use the models and data directly. Ask "What happens if Russia launches 800
-Shaheds tonight?" or "Is violence in Sudan feeding on itself?" and the answer comes from
-the data, not a guess.
+Jomini can run as an MCP server, so Claude and other AI agents can use the models and data
+directly.
 
 **Claude Code:**
 
@@ -228,36 +184,70 @@ claude mcp add jomini -- uvx --from "jomini[mcp] @ git+https://github.com/umitka
 
 | Tool | What it does |
 |---|---|
-| `air_defense_raid` | Run drone raids against the Ukraine-fitted defence, or one with fixed capacity, for one night or many |
-| `air_defense_saturation_test` | Test Ukraine's nightly reports for saturation, by weapon and period |
+| `air_defense_raid` | Run drone raids against the Ukraine-fitted defence or one you design, for one night or many |
+| `air_defense_saturation_test` | Check Ukraine's nightly reports: do bigger raids leak a bigger share? |
 | `conflict_events` | Monthly events and deaths for any conflict or country since 1989 |
 | `escalation_model` | How strongly violence in a conflict feeds on itself |
 | `effectiveness_trend` | How each side's effectiveness changed over time |
-| `get_loss_series` | Loss time series: Kursk, Ukrainian General Staff, Oryx |
-| `loss_intensity` | The smoothed loss rate behind a noisy series |
+| `get_loss_series`, `loss_intensity` | Daily and smoothed losses: Kursk, Ukrainian General Staff, Oryx |
 | `search_battles`, `get_battle` | Find a historical battle and read its full record |
-| `fit_battle`, `what_if`, `simulate_battle` | Measure each side's effectiveness in a battle, and refight it with changes |
-| `compare_effectiveness`, `combat_power` | How deadly an army was, and which factors made it so |
+| `fit_battle`, `what_if`, `simulate_battle` | Measure each side in a battle, and refight it with changes |
+| `compare_effectiveness`, `combat_power` | How deadly an army was, and what made it so |
 | `estimate_law`, `fit_law_to_series` | Fit attrition models to groups of battles or to loss series |
 | `breakpoint_distribution` | How much loss an army takes before it breaks |
-| `salvo_exchange` | Missile and drone exchanges with Hughes' salvo model |
+| `salvo_exchange` | Missile and drone exchanges |
 | `list_datasets`, `cite` | Every dataset's coverage, licence and caveats, and BibTeX |
 
-Every result lists its sources and methods. Pass their keys to `cite` for BibTeX. Each
-dataset's caveats, such as "one side's claims", travel with the results.
+Every answer lists the sources it used, and `cite` turns them into BibTeX.
 
-## Sources and citation
+## Sources
 
-```python
-from jomini import catalog
+| Dataset | Licence | |
+|---|---|---|
+| CDB90: CAA Database of Battles | CC0 1.0 (data); MIT (code) | ships with Jomini |
+| Battle of Kursk, southern front, daily | Public domain (U.S. Government work, 17 U.S.C. 105) | ships with Jomini |
+| American Civil War battles (Livermore 1900) | Public domain (1900); transcription ODC-BY 1.0 | ships with Jomini |
+| UCDP Georeferenced Event Dataset 26.1 | CC BY 4.0 | downloaded when used |
+| UCDP Candidate GED (provisional, current year) | CC BY 4.0 | downloaded when used |
+| Russian losses claimed by Ukraine's General Staff | MIT (compilation) | downloaded when used |
+| Oryx visually confirmed equipment losses (weekly) | CC BY 4.0 (compilation) | downloaded when used |
+| Oryx confirmed losses by event date (both sides) | MIT (compilation) | downloaded when used |
+| Russian drone and missile raids on Ukraine (nightly) | CC BY-NC-SA 4.0 (non-commercial; not bundled) | downloaded when used |
 
-catalog.DATASETS["ukraine_air_raids"].caveats  # read these before drawing conclusions
-print(catalog.bibtex(["ukraine_air_raids", "air_defense"]))
-```
+<details>
+<summary>Papers and books</summary>
 
-`jomini.catalog` records each dataset's coverage, licence, caveats and references, and
-the papers behind each method. Check entries against the publisher before you cite them
-formally.
+- Lanchester, Frederick W. (1916). *Aircraft in Warfare: The Dawn of the Fourth Arm*. Constable.
+- Bracken, Jerome (1995). *Lanchester Models of the Ardennes Campaign*. Naval Research Logistics.
+- Helmbold, Robert L. (1964). *Some Observations on the Use of Lanchester's Theory for Prediction*. Operations Research.
+- Helmbold, Robert L. (1971). *Decision in Battle: Breakpoint Hypotheses and Engagement Termination Data*. RAND Corporation.
+- Hartley, Dean S., III (1995). *A Mathematical Model of Attrition Data*. Naval Research Logistics.
+- Fricker, Ronald D., Jr. (1998). *Attrition Models of the Ardennes Campaign*. Naval Research Logistics.
+- Lucas, Thomas W.; Turkes, T. (2004). *Fitting Lanchester Equations to the Battles of Kursk and Ardennes*. Naval Research Logistics.
+- Hughes, Wayne P., Jr. (1995). *A Salvo Model of Warships in Missile Combat Used to Evaluate Their Staying Power*. Naval Research Logistics.
+- Dupuy, Trevor N. (1979). *Numbers, Predictions and War: Using History to Evaluate Combat Factors and Predict the Outcome of Battles*. Bobbs-Merrill.
+- Rotte, Ralph; Schmidt, Christoph M. (2003). *On the Production of Victory: Empirical Determinants of Battlefield Success in Modern War*. Defence and Peace Economics.
+- Brunton, Steven L.; Proctor, Joshua L.; Kutz, J. Nathan (2016). *Discovering Governing Equations from Data by Sparse Identification of Nonlinear Dynamical Systems*. Proceedings of the National Academy of Sciences. https://doi.org/10.1073/pnas.1517384113
+- Rauch, H. E.; Tung, F.; Striebel, C. T. (1965). *Maximum Likelihood Estimates of Linear Dynamic Systems*. AIAA Journal.
+- (2024). *Analyzing Russia–Ukraine War Patterns Based on Lanchester Model Using SINDy Algorithm*. Mathematics. https://doi.org/10.3390/math12060851
+- Hawkes, Alan G. (1971). *Spectra of Some Self-Exciting and Mutually Exciting Point Processes*. Biometrika.
+- Lewis, Erik; Mohler, George; Brantingham, P. Jeffrey; Bertozzi, Andrea L. (2012). *Self-Exciting Point Process Models of Civilian Deaths in Iraq*. Security Journal.
+- Browning, Raiha; Patten, Hamish; Rousseau, Judith; Mengersen, Kerrie (2024). *Bayesian Spatiotemporal Modelling of Political Violence and Conflict Events Using Discrete-Time Hawkes Processes*. arXiv:2408.14940.
+- Sundberg, Ralph; Melander, Erik (2013). *Introducing the UCDP Georeferenced Event Dataset*. Journal of Peace Research.
+- Davies, Shawn; Pettersson, Therése; Öberg, Magnus (2026). *Organized Violence 1989–2025, and Violent Political Protests*. Journal of Peace Research. https://doi.org/10.1093/jopres/xjag046
+- U.S. Army Concepts Analysis Agency (1991). *Database of Battles, Version 1990 (CDB90)*. U.S. Army Concepts Analysis Agency.
+- Arnold, Jeffrey B. (2026). *CDB90 Battle Dataset (release 10.8.0)*. https://github.com/jrnold/CDB90. https://doi.org/10.5281/zenodo.23928303
+- Livermore, Thomas L. (1900). *Numbers and Losses in the Civil War in America, 1861–65*. Houghton, Mifflin and Company.
+- Arnold, Jeffrey B. (n.d.). *American Civil War Battle Data*. https://github.com/jrnold/acw_battle_data. https://doi.org/10.6084/m9.figshare.1515995
+- Ivaniuk, Petro (n.d.). *2022 Ukraine–Russia War Dataset*. https://github.com/PetroIvaniuk/2022-Ukraine-Russia-War-Dataset.
+- Oryx (n.d.). *Attack on Europe: Documenting Equipment Losses During the Russian Invasion of Ukraine*. https://www.oryxspioenkop.com/.
+- Scarnecchia, Daniel (n.d.). *oryx_data*. https://github.com/scarnecchia/oryx_data.
+- Drake, Lee (n.d.). *Russia-Ukraine*. https://github.com/leedrake5/Russia-Ukraine.
+- Randow, Charles; Allaire, Ryan H.; Mastroberardino, Antonio (2026). *Modeling Drone Swarms with a PDE Extension of Lanchester's Laws*. The Journal of Defense Modeling and Simulation. https://doi.org/10.1177/15485129261436073
+- Holling, C. S. (1959). *Some Characteristics of Simple Types of Predation and Parasitism*. The Canadian Entomologist.
+- Ivaniuk, Petro (n.d.). *Massive Missile Attacks on Ukraine*. https://www.kaggle.com/datasets/piterfm/massive-missile-attacks-on-ukraine.
+
+</details>
 
 ## Development
 

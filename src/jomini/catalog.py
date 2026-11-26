@@ -350,7 +350,7 @@ REFERENCES: dict[str, Reference] = {
             "jomini",
             "misc",
             author='Usta, {\\"U}mit Kaan',
-            title=f"Jomini: Lanchester Combat Models and Historical Battle Data "
+            title=f"Jomini: Combat Models and Data from the Musket to the Drone "
             f"(version {__version__})",
             howpublished="\\url{https://github.com/umitkaanusta/Jomini}",
         ),
