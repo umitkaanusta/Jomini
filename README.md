@@ -298,6 +298,12 @@ Every answer lists the sources it used, and `cite` turns them into BibTeX.
 | Oryx confirmed losses by event date (both sides) | MIT (compilation) | downloaded when used |
 | Russian drone and missile raids on Ukraine (nightly) | CC BY-NC-SA 4.0 (non-commercial; not bundled) | downloaded when used |
 
+The air-raid data is for non-commercial use only. Jomini downloads it for you but doesn't
+change its licence: if you use it, the same terms apply to you.
+
+Jomini uses only figures that have already been published, as daily or nightly totals.
+It doesn't collect or publish where air defences are or where strikes landed.
+
 <details>
 <summary>Papers and books</summary>
 
