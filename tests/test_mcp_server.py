@@ -41,6 +41,7 @@ def test_lists_all_tools_as_read_only() -> None:
         "escalation_model",
         "air_defense_raid",
         "air_defense_strike",
+        "equipment_catalog",
         "air_defense_saturation_test",
     }
     assert all(t.annotations and t.annotations.read_only_hint for t in tools)
@@ -358,6 +359,35 @@ def test_air_defense_strike() -> None:
     assert custom["waves"][0]["share_through"] == pytest.approx(1.0)
     with pytest.raises(ToolError):
         call("air_defense_strike", waves=[])
+
+
+def test_strike_with_catalogue_equipment() -> None:
+    out = call(
+        "air_defense_strike",
+        waves=[
+            {"name": "Shahed-136", "size": 120, "launch_window_hours": 2},
+            {"name": "Iskander-M", "size": 6, "launch_at_hours": 2.5},
+        ],
+        defenses={"Patriot PAC-3": 1, "Gepard": 4, "mobile gun team": 30},
+    )
+    assert out["defense"] == "catalogue"
+    assert {w["wave"] for w in out["waves"]} == {"Shahed-136", "Iskander-M"}
+    patriot = next(r for r in out["rings"] if r["ring"] == "Patriot PAC-3")
+    assert patriot["kills"]["Shahed-136"] == 0 and patriot["kills"]["Iskander-M"] > 0
+    assert out["attacker_cost_usd"] > 0
+    with pytest.raises(ToolError):
+        call("air_defense_strike", waves=[{"name": "Death Star", "size": 1}])
+    with pytest.raises(ToolError):
+        call("air_defense_strike", waves=[{"name": "TB2", "size": 1}], defenses={"Shield": 1})
+
+
+def test_equipment_catalog() -> None:
+    both = call("equipment_catalog")
+    assert len(both["attackers"]) > 80 and len(both["defences"]) > 60
+    turkish = call("equipment_catalog", side="attackers", search="turkey")
+    assert {"Bayraktar TB2", "Bayraktar Akinci"} <= {a["name"] for a in turkish["attackers"]}
+    patriot = call("equipment_catalog", side="defences", search="patriot pac-3")["defences"][0]
+    assert "ballistic missile" in patriot["engages"] and "loitering drone" not in patriot["engages"]
 
 
 def test_air_defense_tools(monkeypatch: pytest.MonkeyPatch) -> None:

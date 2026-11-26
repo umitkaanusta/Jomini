@@ -84,8 +84,9 @@ Research workflow:
   war in Ukraine (Ukrainian General Staff claims; Oryx visually confirmed losses).
 - Time series: get_loss_series, effectiveness_trend (Kalman-smoothed relative
   effectiveness), loss_intensity (smoothed loss rate), fit_law_to_series.
-- Air defence: air_defense_strike simulates mixed strikes (drones ahead of ballistic
-  or cruise missiles) against rings that share their interceptors; air_defense_raid
+- Air defence: air_defense_strike simulates strikes by named drones, missiles, glide
+  bombs, rockets or aircraft against a defence built from named systems (Patriot,
+  Gepard, F-16, Iron Dome, ...; browse with equipment_catalog); air_defense_raid
   simulates drone raids against a layered defence fitted
   to Ukraine's nightly reports (or a generic fixed-capacity one: saturation, magazines,
   cost exchange); air_defense_saturation_test checks those reports for saturation.
@@ -1184,10 +1185,15 @@ def _build_defense(layers: list[AirDefenseLayer]) -> Any:
 class StrikeWave(BaseModel):
     """One wave of a mixed strike."""
 
-    name: str = Field(description="e.g. 'drones', 'ballistic missiles', 'cruise missiles'")
+    name: str = Field(
+        description="A catalogue attacker (e.g. 'Shahed-136', 'Iskander-M', 'Kh-101', "
+        "'TB2'; see equipment_catalog) or any label if you give speed_kmh"
+    )
     size: float = Field(description="Number of attackers")
-    speed_kmh: float = Field(
-        description="Drones ~185, cruise missiles ~800, ballistic missiles ~7000"
+    speed_kmh: float | None = Field(
+        None,
+        description="Omit for catalogue attackers. Otherwise drones ~185, cruise "
+        "missiles ~800, ballistic missiles ~7000",
     )
     launch_at_hours: float = Field(0.0, description="When the wave reaches 300 km out")
     launch_window_hours: float = Field(0.0, description="Spread of arrivals (0 = together)")
@@ -1197,45 +1203,77 @@ class StrikeWave(BaseModel):
 @server.tool(annotations=_READ_ONLY)
 @_provenance("air_defense")
 def air_defense_strike(
-    waves: list[StrikeWave], layers: list[AirDefenseLayer] | None = None
+    waves: list[StrikeWave],
+    defenses: dict[str, float] | None = None,
+    layers: list[AirDefenseLayer] | None = None,
 ) -> dict[str, Any]:
-    """Simulate a mixed strike (drones, cruise and ballistic missiles in waves with
-    their own speeds and timing) against a layered defence whose rings share their
-    fire and interceptors among whatever is inside them. Shows how drones sent ahead
-    of missiles draw fire and use up interceptors.
+    """Simulate a strike of drones, missiles, glide bombs, rockets or aircraft (in waves
+    with their own speeds and timing) against a layered air defence. Rings share their
+    fire and interceptors among whatever is inside them, so drones sent ahead of
+    missiles can draw fire and use up interceptors.
 
-    Default defence (illustrative, not fitted): fighters 300-120 km (drones only), an
-    upper tier 120-40 km (ballistic missiles only, 70 interceptors), and a lower tier
-    40-0 km that engages both (90 interceptors). The default treats any wave whose name
-    contains "missile" as a missile. Pass ``layers`` with ``pk_against`` to design your
-    own. Returns how many of each wave got through and shots and kills per ring.
+    Build the defence from the equipment catalogue with ``defenses``, a map of system
+    name to number of units, e.g. {"Patriot PAC-3": 2, "Gepard": 6, "F-16": 4,
+    "mobile gun team": 30} (see equipment_catalog). Kill chances come from class
+    defaults calibrated so a Ukraine-like city defence stops Ukraine's reported shares
+    of drones and cruise missiles; they are rough, not real system performance.
+    Medium- and long-range SAMs hold fire on slow drones, and missile batteries fire
+    two interceptors per target. Or design rings by hand with ``layers``. With
+    neither, an illustrative three-ring defence is used.
+
+    Returns how many of each wave got through, and shots, kills and interceptors left
+    per ring.
     """
+    from jomini import equipment as eq
     from jomini.airdefense import Wave, missile_defense
 
-    if not 1 <= len(waves) <= 6:
-        raise ToolError("give 1 to 6 waves")
-    try:
-        built = [
-            Wave(
-                w.name,
-                w.size,
-                w.speed_kmh,
-                launch_at=w.launch_at_hours,
-                launch_window=w.launch_window_hours,
-                unit_cost=w.unit_cost,
-                diffusion=50.0 if w.speed_kmh < 300 else 0.0,
-            )
-            for w in waves
-        ]
-    except ValueError as exc:
-        raise ToolError(str(exc)) from None
-    if any(w.size > 5000 or w.speed_kmh > 30_000 for w in waves):
+    if not 1 <= len(waves) <= 8:
+        raise ToolError("give 1 to 8 waves")
+    built = []
+    for w in waves:
+        try:
+            if w.speed_kmh is None:
+                try:
+                    built.append(eq.wave(w.name, w.size, launch_at=w.launch_at_hours,
+                                         launch_window=w.launch_window_hours))  # fmt: skip
+                except KeyError:
+                    raise ToolError(
+                        f"{w.name!r} is not in the catalogue; give speed_kmh or pick a "
+                        "name from equipment_catalog"
+                    ) from None
+            else:
+                built.append(
+                    Wave(
+                        w.name,
+                        w.size,
+                        w.speed_kmh,
+                        launch_at=w.launch_at_hours,
+                        launch_window=w.launch_window_hours,
+                        unit_cost=w.unit_cost,
+                        diffusion=50.0 if w.speed_kmh < 300 else 0.0,
+                    )
+                )
+        except ValueError as exc:
+            raise ToolError(str(exc)) from None
+    if any(w.size > 5000 or w.speed > 30_000 for w in built):
         raise ToolError("at most 5000 attackers and 30,000 km/h per wave")
     if layers:
         model = _build_defense(layers)
+        source = "custom"
+    elif defenses:
+        if len(defenses) > 15 or any(not 0 < n <= 500 for n in defenses.values()):
+            raise ToolError("give up to 15 systems, each with 1 to 500 units")
+        try:
+            model = eq.defense(defenses)
+        except KeyError as exc:
+            raise ToolError(f"{exc.args[0]} (see equipment_catalog)") from None
+        source = "catalogue"
     else:
         base = missile_defense()
-        kinds = {w.name: ("missiles" if "missile" in w.name.lower() else "drones") for w in waves}
+        kinds = {
+            w.name: ("missiles" if "missile" in (w.kind or w.name).lower() else "drones")
+            for w in built
+        }
         model = type(base)(
             tuple(
                 replace(
@@ -1245,10 +1283,12 @@ def air_defense_strike(
                 for lay in base.layers
             )
         )
+        source = "illustrative"
     try:
         result = model.strike(built)
     except ValueError as exc:
         raise ToolError(str(exc)) from None
+    costs = {lay.name: lay.cost_per_shot for lay in model.layers}
     return {
         "waves": [
             {
@@ -1265,13 +1305,73 @@ def air_defense_strike(
                 "kills": {w: _round(float(k)) for w, k in zip(result.waves, kills, strict=True)},
                 "shots": _round(float(shots.sum())),
                 "interceptors_left": _round(float(left)),
+                "spent_usd": _round(float(shots.sum() * costs[ring])),
             }
             for ring, kills, shots, left in zip(
                 result.layers, result.kills, result.shots, result.magazine_left, strict=True
             )
         ],
-        "defense": "custom" if layers else "illustrative",
+        "attacker_cost_usd": _round(sum(w.size * w.unit_cost for w in built)),
+        "defense": source,
     }
+
+
+@server.tool(annotations=_READ_ONLY)
+@_provenance("air_defense")
+def equipment_catalog(
+    side: Literal["attackers", "defences", "both"] = "both", search: str | None = None
+) -> dict[str, Any]:
+    """List the drones, missiles, aircraft, bombs and rockets (attackers) and the air
+    defences in Jomini's equipment catalogue, with speed or range, cost, origin and
+    class. Filter with ``search`` (matches name, alias, class or origin). For each
+    defence, ``engages`` lists the attacker classes it can hit by default. Specs are
+    rounded public figures; kill chances are rough class defaults.
+    """
+    from jomini import equipment as eq
+
+    needle = (search or "").casefold()
+
+    def hit(item: Any) -> bool:
+        text = " ".join([item.name, *item.aliases, item.kind, item.origin]).casefold()
+        return needle in text
+
+    out: dict[str, Any] = {}
+    if side in ("attackers", "both"):
+        out["attackers"] = [
+            {
+                "name": a.name,
+                "aliases": list(a.aliases),
+                "class": a.kind,
+                "origin": a.origin,
+                "speed_kmh": a.speed_kmh,
+                "range_km": a.range_km,
+                "unit_cost_usd": a.unit_cost or None,
+                **({"note": a.note} if a.note else {}),
+            }
+            for a in eq.ATTACKERS
+            if hit(a)
+        ]
+    if side in ("defences", "both"):
+        out["defences"] = []
+        for d in eq.DEFENDERS:
+            if not hit(d):
+                continue
+            lay = eq.layer(d.name)
+            engages = [k for k in eq.ATTACKER_KINDS if lay.pk_for("", k) > 0]
+            out["defences"].append(
+                {
+                    "name": d.name,
+                    "aliases": list(d.aliases),
+                    "class": d.kind,
+                    "origin": d.origin,
+                    "range_km": d.range_km,
+                    "shots_per_unit": None if math.isinf(d.shots) else d.shots,
+                    "cost_per_shot_usd": d.cost_per_shot,
+                    "engages": engages,
+                    **({"note": d.note} if d.note else {}),
+                }
+            )
+    return out
 
 
 @server.tool(annotations=_READ_ONLY)

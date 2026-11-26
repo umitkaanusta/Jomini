@@ -82,22 +82,39 @@ class Layer:
     pk_against: Mapping[str, float] | None = None
     """For :meth:`AirDefense.strike`: kill chance per shot against each wave by name
     (missing waves use ``pk``; 0 means the layer can't engage that wave)."""
+    shots_per_target: float | None = None
+    """If set, the layer fires this many shots at each target that crosses it (missile
+    batteries' "shoot two" doctrine) instead of firing at ``engage_rate`` for as long
+    as the target is in range. Its engage rate then scales with the target's speed."""
 
     def __post_init__(self) -> None:
         if not 0 <= self.inner < self.outer:
             raise ValueError(f"layer {self.name!r}: need 0 <= inner < outer")
-        if not 0 < self.pk <= 1:
-            raise ValueError(f"layer {self.name!r}: pk must be in (0, 1]")
+        if not 0 <= self.pk <= 1:
+            raise ValueError(f"layer {self.name!r}: pk must be in [0, 1]")
         if self.fire_rate <= 0 or self.engage_rate <= 0:
             raise ValueError(f"layer {self.name!r}: rates must be positive")
         if self.magazine < 0 or self.cost_per_shot < 0 or self.surge_reference <= 0:
             raise ValueError(f"layer {self.name!r}: magazine and costs must be non-negative")
+        if self.shots_per_target is not None and self.shots_per_target <= 0:
+            raise ValueError(f"layer {self.name!r}: shots_per_target must be positive")
         if self.pk_against and not all(0 <= v <= 1 for v in self.pk_against.values()):
             raise ValueError(f"layer {self.name!r}: pk_against values must be in [0, 1]")
 
-    def pk_for(self, wave: str) -> float:
-        """Kill chance per shot against ``wave``."""
-        return self.pk if self.pk_against is None else self.pk_against.get(wave, self.pk)
+    def engage_rate_for(self, speed: float) -> float:
+        """Shots per hour at a lone target moving at ``speed`` km/h."""
+        if self.shots_per_target is None:
+            return self.engage_rate
+        return self.shots_per_target * speed / (self.outer - self.inner)
+
+    def pk_for(self, wave: str, kind: str = "") -> float:
+        """Kill chance per shot against ``wave`` (looked up by wave name, then by the
+        wave's ``kind``, e.g. "ballistic missile")."""
+        if self.pk_against is None:
+            return self.pk
+        if wave in self.pk_against:
+            return self.pk_against[wave]
+        return self.pk_against.get(kind, self.pk)
 
 
 @dataclass(frozen=True)
@@ -151,19 +168,23 @@ class AirDefense:
 
     :param diffusion: Spreading of the raid, km^2/h (0 keeps it a tight column).
     :param dx: Grid spacing in km.
+    :param edge: Distance from the target, km, where attackers enter the airspace.
+        Default 0: just beyond the furthest-reaching layer. Set it (e.g. 300) to compare
+        defences of different reach against the same strike.
     """
 
     layers: tuple[Layer, ...]
     speed: float = 185.0
     diffusion: float = 50.0
     dx: float = 2.0
+    edge: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.layers:
             raise ValueError("need at least one layer")
         if len({layer.name for layer in self.layers}) != len(self.layers):
             raise ValueError("layer names must be unique")
-        if self.speed <= 0 or self.diffusion < 0 or self.dx <= 0:
+        if self.speed <= 0 or self.diffusion < 0 or self.dx <= 0 or self.edge < 0:
             raise ValueError("speed and dx must be positive, diffusion non-negative")
 
     def raid(
@@ -296,7 +317,7 @@ def _simulate(
 ) -> RaidResult:
     layers = defense.layers
     v, diff, dx = defense.speed, defense.diffusion, defense.dx
-    extent = max(layer.outer for layer in layers) + 4 * dx
+    extent = max(defense.edge, *(layer.outer for layer in layers)) + 4 * dx
     n = math.ceil(extent / dx)
     centres = (np.arange(n) + 0.5) * dx
     masks = [(centres >= lay.inner) & (centres < lay.outer) for lay in layers]
@@ -340,7 +361,7 @@ def _simulate(
             present = float(u[mask].sum() * dx)
             if present <= 1e-12 or left[i] <= 0:
                 continue
-            f, e = lay.fire_rate * scale[i], lay.engage_rate * scale[i]
+            f, e = lay.fire_rate * scale[i], lay.engage_rate_for(v) * scale[i]
             rate = e * present if math.isinf(f) else f * e * present / (f + e * present)
             fired = min(rate * dt, left[i])
             killed = min(lay.pk * fired, 0.999 * present)
@@ -384,6 +405,8 @@ class Wave:
     launch_window: float = 0.0
     diffusion: float = 0.0
     unit_cost: float = 0.0
+    kind: str = ""
+    """Class of attacker (e.g. "loitering drone"), for kill chances set by class."""
 
     def __post_init__(self) -> None:
         if self.size <= 0 or self.speed <= 0:
@@ -427,7 +450,8 @@ class _StrikeState:
         self.defense, self.waves = defense, tuple(waves)
         layers, dx = defense.layers, defense.dx
         self.dx = dx
-        self.n = math.ceil((max(lay.outer for lay in layers) + 4 * dx) / dx)
+        reach = max(defense.edge, *(lay.outer for lay in layers))
+        self.n = math.ceil((reach + 4 * dx) / dx)
         self.extent = self.n * dx
         centres = (np.arange(self.n) + 0.5) * dx
         self.masks = [(centres >= lay.inner) & (centres < lay.outer) for lay in layers]
@@ -436,7 +460,8 @@ class _StrikeState:
         self.dt = min(1.0 / (w.speed / dx + 2 * w.diffusion / (dx * dx)) for w in waves)
         total = sum(w.size for w in waves)
         self.scale = np.array([(total / lay.surge_reference) ** lay.surge for lay in layers])
-        self.pk = np.array([[lay.pk_for(w.name) for w in waves] for lay in layers])
+        self.pk = np.array([[lay.pk_for(w.name, w.kind) for w in waves] for lay in layers])
+        self.engage = np.array([[lay.engage_rate_for(w.speed) for w in waves] for lay in layers])
         self.u = np.zeros((len(waves), self.n))
         self.launched = np.zeros(len(waves))
         self.leaked = np.zeros(len(waves))
@@ -477,13 +502,15 @@ class _StrikeState:
             if self.left[i] <= 0:
                 continue
             present = u[:, self.masks[i]].sum(axis=1) * dx * (self.pk[i] > 0)
-            total = present.sum()
-            if total <= 1e-12:
+            if present.sum() <= 1e-12:
                 continue
-            f, e = lay.fire_rate * self.scale[i], lay.engage_rate * self.scale[i]
-            rate = e * total if math.isinf(f) else f * e * total / (f + e * total)
+            # Multi-prey Holling type II: shots at wave j are F e_j N_j / (F + sum e_i N_i).
+            f = lay.fire_rate * self.scale[i]
+            demand = self.engage[i] * self.scale[i] * present
+            total = demand.sum()
+            rate = total if math.isinf(f) else f * total / (f + total)
             fired = min(rate * dt, self.left[i])
-            share = fired * present / total
+            share = fired * demand / total
             killed = np.minimum(self.pk[i] * share, 0.999 * present)
             frac = np.divide(killed, present, out=np.zeros_like(killed), where=present > 0)
             u[:, self.masks[i]] *= (1 - frac)[:, None]
