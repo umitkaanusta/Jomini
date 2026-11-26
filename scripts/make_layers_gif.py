@@ -1,4 +1,4 @@
-"""Draw docs/cheap-layers.gif: the same strike against missile batteries alone, and
+"""Draw docs/cheap-layers-v2.gif: the same strike against missile batteries alone, and
 against the same batteries behind cheap guns and interceptor drones.
 
     uv run python scripts/make_layers_gif.py
@@ -35,7 +35,7 @@ def batteries() -> list:
 def main() -> None:
     cheap = AirDefense((*batteries(), *(eq.layer(n, c) for n, c in CHEAP.items())), edge=300)
     render(
-        "docs/cheap-layers.gif",
+        "docs/cheap-layers-v2.gif",
         [
             Panel(
                 "Missile batteries only",

@@ -1,4 +1,4 @@
-"""Draw docs/strike.gif: 120 medium-range ballistic missiles against an Israel-style
+"""Draw docs/strike-v2.gif: 120 medium-range ballistic missiles against an Israel-style
 layered defence, alone and with drones and cruise missiles sent ahead of them.
 
 The defence is built from the equipment catalogue and is illustrative, not Israel's real
@@ -41,7 +41,7 @@ def main() -> None:
     labels = {eq.layer(n, c).name: eq.layer(n, c).name for n, c in DEFENCE.items()}
     labels["Aegis destroyer (SM-3) x2"] = "Aegis SM-3 x2"
     render(
-        "docs/strike.gif",
+        "docs/strike-v2.gif",
         [
             Panel("120 ballistic missiles", eq.defense(DEFENCE), missiles(), labels, SHORT, 0),
             Panel(

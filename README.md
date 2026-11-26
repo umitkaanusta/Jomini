@@ -16,7 +16,7 @@ are fought today and how they were fought in the past.
 
 ## Simulating a drone raid
 
-![Two raids flying through three rings of air defence: 24% of a 30-drone raid gets through, 9% of a 500-drone raid](docs/raid.gif)
+![Two raids flying through three rings of air defence: 24% of a 30-drone raid gets through, 9% of a 500-drone raid](docs/raid-v2.gif)
 
 Two drone raids, one of 30 drones and one of 500, fly at a city by night. Three rings of
 defence stand in their way: interceptor drones far out, mobile gun teams closer in, and
@@ -121,7 +121,7 @@ uv run python scripts/make_raid_gif.py
 
 ## A missile and drone strike
 
-![120 ballistic missiles against a layered defence, alone and behind drones and cruise missiles: 29 get through either way](docs/strike.gif)
+![120 ballistic missiles against a layered defence, alone and behind drones and cruise missiles: 29 get through either way](docs/strike-v2.gif)
 
 A hundred and twenty medium-range ballistic missiles fly at a country defended in layers,
 as Israel is. Arrow 3 batteries and Aegis destroyers reach far out, Arrow 2, David's Sling
@@ -208,7 +208,7 @@ uv run python scripts/make_strike_gif.py
 
 ## Cheap guns protect expensive missiles
 
-![The same strike against missile batteries alone, and behind cheap guns and interceptor drones](docs/cheap-layers.gif)
+![The same strike against missile batteries alone, and behind cheap guns and interceptor drones](docs/cheap-layers-v2.gif)
 
 A hundred Shahed drones fly at a city over an hour and a half. Ten Iskander ballistic
 missiles follow an hour later. In the top run the city has only missile batteries, a

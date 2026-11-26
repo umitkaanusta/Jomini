@@ -1,4 +1,4 @@
-"""Draw docs/raid.gif: a small and a large drone raid against the defence fitted to
+"""Draw docs/raid-v2.gif: a small and a large drone raid against the defence fitted to
 Ukraine's nightly reports.
 
     uv run python scripts/make_raid_gif.py
@@ -24,7 +24,7 @@ def raid(size: int) -> list[Wave]:
 
 def main() -> None:
     render(
-        "docs/raid.gif",
+        "docs/raid-v2.gif",
         [
             Panel("30 drones", ukraine_defense(), raid(30), LABELS, seed=0),
             Panel("500 drones", ukraine_defense(), raid(500), LABELS, seed=1),
