@@ -42,7 +42,7 @@ within the same month (see ``docs`` and the MCP tool ``air_defense_saturation_te
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -79,6 +79,9 @@ class Layer:
     cost_per_shot: float = 0.0
     surge: float = 0.0
     surge_reference: float = 100.0
+    pk_against: Mapping[str, float] | None = None
+    """For :meth:`AirDefense.strike`: kill chance per shot against each wave by name
+    (missing waves use ``pk``; 0 means the layer can't engage that wave)."""
 
     def __post_init__(self) -> None:
         if not 0 <= self.inner < self.outer:
@@ -89,6 +92,12 @@ class Layer:
             raise ValueError(f"layer {self.name!r}: rates must be positive")
         if self.magazine < 0 or self.cost_per_shot < 0 or self.surge_reference <= 0:
             raise ValueError(f"layer {self.name!r}: magazine and costs must be non-negative")
+        if self.pk_against and not all(0 <= v <= 1 for v in self.pk_against.values()):
+            raise ValueError(f"layer {self.name!r}: pk_against values must be in [0, 1]")
+
+    def pk_for(self, wave: str) -> float:
+        """Kill chance per shot against ``wave``."""
+        return self.pk if self.pk_against is None else self.pk_against.get(wave, self.pk)
 
 
 @dataclass(frozen=True)
@@ -235,6 +244,21 @@ class AirDefense:
             tuple(results), tuple(layer.name for layer in self.layers), np.array(stock)
         )
 
+    def strike(self, waves: Sequence[Wave], *, t_max: float = 12.0) -> StrikeResult:
+        """Simulate a mixed strike: several waves (drones, cruise or ballistic missiles)
+        with their own speeds and launch times, against layers that share fire capacity
+        and magazines between them.
+
+        A layer splits its shots across the waves it can engage in proportion to how
+        many of each are inside it (a multi-prey Holling type II response). So drones
+        arriving with missiles draw fire and use up interceptors the missiles would
+        otherwise have faced.
+        """
+        state = _StrikeState(self, waves)
+        while state.t < t_max and not state.done:
+            state.step()
+        return state.result()
+
     def with_surge(self, surge: float) -> AirDefense:
         """The same defence with every layer's ``surge`` set (see :class:`Layer`)."""
         return replace(self, layers=tuple(replace(lay, surge=surge) for lay in self.layers))
@@ -340,6 +364,178 @@ def _simulate(
         for i, lay in enumerate(layers)
     )
     return RaidResult(size, leaked, reports, size * unit_cost, np.array(times), np.array(rates))
+
+
+@dataclass(frozen=True)
+class Wave:
+    """One wave of a mixed strike.
+
+    :param speed: km/h (drones ~185, cruise missiles ~800, ballistic missiles ~7,000
+        averaged over the last few hundred km).
+    :param launch_at: Hours after the start when the wave reaches the outer edge.
+    :param launch_window: Hours over which the wave arrives there (0 = all at once).
+    :param diffusion: Spreading, km^2/h.
+    """
+
+    name: str
+    size: float
+    speed: float
+    launch_at: float = 0.0
+    launch_window: float = 0.0
+    diffusion: float = 0.0
+    unit_cost: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.size <= 0 or self.speed <= 0:
+            raise ValueError(f"wave {self.name!r}: size and speed must be positive")
+        if self.launch_at < 0 or self.launch_window < 0 or self.diffusion < 0:
+            raise ValueError(f"wave {self.name!r}: times and diffusion must be non-negative")
+
+
+@dataclass(frozen=True)
+class StrikeResult:
+    waves: tuple[str, ...]
+    launched: NDArray[np.float64]
+    leaked: NDArray[np.float64]
+    layers: tuple[str, ...]
+    kills: NDArray[np.float64]
+    """Kills by layer (rows) and wave (columns)."""
+    shots: NDArray[np.float64]
+    """Shots by layer and wave."""
+    magazine_left: NDArray[np.float64]
+
+    def leak_fraction(self, wave: str) -> float:
+        i = self.waves.index(wave)
+        return float(self.leaked[i] / self.launched[i])
+
+    def __str__(self) -> str:
+        parts = [
+            f"{w}: {lk:.1f} of {la:.0f} through ({100 * lk / la:.1f}%)"
+            for w, la, lk in zip(self.waves, self.launched, self.leaked, strict=True)
+        ]
+        return "; ".join(parts)
+
+
+class _StrikeState:
+    """Mutable state of a strike simulation, advanced one step at a time."""
+
+    def __init__(self, defense: AirDefense, waves: Sequence[Wave]) -> None:
+        if not waves:
+            raise ValueError("need at least one wave")
+        if len({w.name for w in waves}) != len(waves):
+            raise ValueError("wave names must be unique")
+        self.defense, self.waves = defense, tuple(waves)
+        layers, dx = defense.layers, defense.dx
+        self.dx = dx
+        self.n = math.ceil((max(lay.outer for lay in layers) + 4 * dx) / dx)
+        self.extent = self.n * dx
+        centres = (np.arange(self.n) + 0.5) * dx
+        self.masks = [(centres >= lay.inner) & (centres < lay.outer) for lay in layers]
+        if not all(m.any() for m in self.masks):
+            raise ValueError("a layer is narrower than the grid; reduce dx")
+        self.dt = min(1.0 / (w.speed / dx + 2 * w.diffusion / (dx * dx)) for w in waves)
+        total = sum(w.size for w in waves)
+        self.scale = np.array([(total / lay.surge_reference) ** lay.surge for lay in layers])
+        self.pk = np.array([[lay.pk_for(w.name) for w in waves] for lay in layers])
+        self.u = np.zeros((len(waves), self.n))
+        self.launched = np.zeros(len(waves))
+        self.leaked = np.zeros(len(waves))
+        self.kills = np.zeros((len(layers), len(waves)))
+        self.shots = np.zeros((len(layers), len(waves)))
+        self.left = np.array([lay.magazine for lay in layers], float)
+        self.hazard = np.zeros((len(layers), len(waves)))
+        """Share of each wave inside each layer killed in the last step."""
+        self.t = 0.0
+
+    @property
+    def done(self) -> bool:
+        launched = np.allclose(self.launched, [w.size for w in self.waves])
+        return bool(launched and self.u.sum() * self.dx < 1e-6 * sum(w.size for w in self.waves))
+
+    def step(self) -> None:
+        dt, dx, u = self.dt, self.dx, self.u
+        for j, w in enumerate(self.waves):
+            if self.launched[j] < w.size and self.t + dt > w.launch_at:
+                if w.launch_window == 0:
+                    add = w.size - self.launched[j]
+                else:
+                    add = min(w.size - self.launched[j], w.size * dt / w.launch_window)
+                u[j, -1] += add / dx
+                self.launched[j] += add
+            out = w.speed * dt / dx * u[j]
+            new = u[j] - out
+            new[:-1] += out[1:]
+            self.leaked[j] += out[0] * dx
+            if w.diffusion > 0:
+                k = w.diffusion * dt / (dx * dx)
+                padded = np.r_[0.0, u[j], u[j, -1]]
+                new += k * (padded[2:] - 2 * u[j] + padded[:-2])
+                self.leaked[j] += k * u[j, 0] * dx
+            u[j] = np.maximum(new, 0.0)
+        self.hazard[:] = 0.0
+        for i, lay in enumerate(self.defense.layers):
+            if self.left[i] <= 0:
+                continue
+            present = u[:, self.masks[i]].sum(axis=1) * dx * (self.pk[i] > 0)
+            total = present.sum()
+            if total <= 1e-12:
+                continue
+            f, e = lay.fire_rate * self.scale[i], lay.engage_rate * self.scale[i]
+            rate = e * total if math.isinf(f) else f * e * total / (f + e * total)
+            fired = min(rate * dt, self.left[i])
+            share = fired * present / total
+            killed = np.minimum(self.pk[i] * share, 0.999 * present)
+            frac = np.divide(killed, present, out=np.zeros_like(killed), where=present > 0)
+            u[:, self.masks[i]] *= (1 - frac)[:, None]
+            self.hazard[i] = frac
+            self.shots[i] += share
+            self.kills[i] += killed
+            self.left[i] -= fired
+        self.t += dt
+
+    def result(self) -> StrikeResult:
+        return StrikeResult(
+            tuple(w.name for w in self.waves),
+            self.launched.copy(),
+            self.leaked.copy(),
+            tuple(lay.name for lay in self.defense.layers),
+            self.kills.copy(),
+            self.shots.copy(),
+            self.left.copy(),
+        )
+
+
+def _strike_steps(
+    defense: AirDefense, waves: Sequence[Wave], *, t_max: float = 12.0
+) -> Iterator[_StrikeState]:
+    """Yield the strike's state after every step (for animation)."""
+    state = _StrikeState(defense, waves)
+    while state.t < t_max:
+        state.step()
+        yield state
+        if state.done:
+            break
+
+
+def missile_defense() -> AirDefense:
+    """An illustrative defence against a mixed strike of drones and ballistic missiles.
+
+    Fighters far out engage only drones. An upper-tier missile defence engages only
+    ballistic missiles. A lower-tier defence near the target engages both and shares
+    its launchers and interceptors between them. Numbers are round placeholders, not
+    fitted to any war: 100 missiles alone lose all but 6, but 150 drones sent ahead of
+    them use up the lower tier and 33 missiles get through.
+    """
+    return AirDefense(
+        (
+            Layer("fighters", 300, 120, pk=0.6, fire_rate=150, engage_rate=2.0,
+                  pk_against={"missiles": 0.0}, cost_per_shot=100_000),
+            Layer("upper tier", 120, 40, pk=0.8, fire_rate=900, engage_rate=400,
+                  magazine=70, pk_against={"drones": 0.0}, cost_per_shot=3_000_000),
+            Layer("lower tier", 40, 0, pk=0.7, fire_rate=3000, engage_rate=600,
+                  magazine=90, cost_per_shot=1_000_000),
+        )
+    )  # fmt: skip
 
 
 def generic_defense(*, magazine_scale: float = 1.0) -> AirDefense:

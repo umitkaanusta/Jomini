@@ -40,6 +40,7 @@ def test_lists_all_tools_as_read_only() -> None:
         "conflict_events",
         "escalation_model",
         "air_defense_raid",
+        "air_defense_strike",
         "air_defense_saturation_test",
     }
     assert all(t.annotations and t.annotations.read_only_hint for t in tools)
@@ -340,6 +341,23 @@ def test_conflict_tools_with_stubbed_ged(monkeypatch: pytest.MonkeyPatch) -> Non
         call("conflict_events")
     with pytest.raises(ToolError):
         call("conflict_events", country="Ukraine", start="last tuesday")
+
+
+def test_air_defense_strike() -> None:
+    missiles = {"name": "ballistic missiles", "size": 100, "speed_kmh": 7000,
+                "launch_at_hours": 2.0, "launch_window_hours": 0.1}  # fmt: skip
+    drones = {"name": "drones", "size": 150, "speed_kmh": 185, "launch_window_hours": 1.0}
+    alone = call("air_defense_strike", waves=[missiles])
+    mixed = call("air_defense_strike", waves=[missiles, drones])
+    share = lambda r: r["waves"][0]["share_through"]  # noqa: E731
+    assert share(alone) < 0.1 < 0.25 < share(mixed)
+    assert mixed["rings"][0]["kills"]["ballistic missiles"] == 0
+    ring = {"name": "guns", "outer_km": 30, "inner_km": 0, "pk": 0.3,
+            "pk_against": {"ballistic missiles": 0}}  # fmt: skip
+    custom = call("air_defense_strike", waves=[missiles], layers=[ring])
+    assert custom["waves"][0]["share_through"] == pytest.approx(1.0)
+    with pytest.raises(ToolError):
+        call("air_defense_strike", waves=[])
 
 
 def test_air_defense_tools(monkeypatch: pytest.MonkeyPatch) -> None:

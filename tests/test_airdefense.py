@@ -10,7 +10,9 @@ from jomini import data
 from jomini.airdefense import (
     AirDefense,
     Layer,
+    Wave,
     generic_defense,
+    missile_defense,
     saturation_test,
     ukraine_defense,
 )
@@ -151,3 +153,32 @@ def test_ukraine_air_raids_parsing() -> None:
     assert data.weapon_class("C-400 and Iskander-M/KN-23") == "ballistic"
     with pytest.raises(ValueError):
         data.ukraine_air_raids("lasers", fetch=lambda url: zipped)  # type: ignore[arg-type]
+
+
+def test_single_wave_strike_matches_raid() -> None:
+    d = generic_defense()
+    wave = Wave("drones", 120, d.speed, launch_window=1.0, diffusion=d.diffusion)
+    assert d.strike([wave]).leaked[0] == pytest.approx(d.raid(120).leaked, rel=1e-6)
+
+
+def test_drones_shield_missiles() -> None:
+    d = missile_defense()
+    missiles = Wave("missiles", 100, 7000, launch_at=2.0, launch_window=0.1)
+    drones = Wave("drones", 150, 185, launch_window=1.0, diffusion=50)
+    alone, mixed = d.strike([missiles]), d.strike([missiles, drones])
+    assert alone.leak_fraction("missiles") < 0.1 < 0.25 < mixed.leak_fraction("missiles")
+    # Fighters never shoot at missiles; the upper tier never shoots at drones.
+    assert mixed.shots[0, 0] == 0 and mixed.shots[1, 1] == 0
+    assert mixed.magazine_left[2] == pytest.approx(0, abs=1e-9)
+    assert "missiles" in str(mixed)
+
+
+def test_strike_validation() -> None:
+    with pytest.raises(ValueError):
+        Wave("x", 0, 100)
+    with pytest.raises(ValueError):
+        missile_defense().strike([])
+    with pytest.raises(ValueError):
+        missile_defense().strike([Wave("a", 1, 100), Wave("a", 2, 100)])
+    with pytest.raises(ValueError):
+        Layer("x", 10, 0, pk=0.5, fire_rate=1, engage_rate=1, pk_against={"a": 2.0})

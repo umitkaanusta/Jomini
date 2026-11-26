@@ -30,7 +30,10 @@ We fitted the model to 778 nights of Ukrainian Air Force reports, from September
 November 2026. The fitted defence stops three drones in four from the small raid, and
 more than nine in ten from the big one.
 
-### The equations
+<details>
+<summary>The equations and the fit</summary>
+
+**The equations**
 
 Each ring is one kind of equipment, with its own range, chance to kill, rate of fire,
 stock of ammunition and cost per shot. In the demo:
@@ -70,7 +73,7 @@ and $e_k$ are multiplied by $(R/100)^{\sigma}$. Drones that reach $x = 0$ get th
 | $M_k$ | Shots left in stock |
 | $\sigma$ | Surge: how much the defence is reinforced for big raids |
 
-### What it means
+**What it means**
 
 - **Few drones:** every drone runs the same risk, $h_k = p_k e_k$. Numbers don't help the
   attacker.
@@ -80,7 +83,7 @@ and $e_k$ are multiplied by $(R/100)^{\sigma}$. Drones that reach $x = 0$ get th
 So a defence that can't reinforce lets a bigger share through as raids grow. If big raids
 leak a smaller share, the defence must be reinforcing ($\sigma > 0$).
 
-### Fitted to Ukraine's data
+**Fitted to Ukraine's data**
 
 Each night the Ukrainian Air Force reports how many drones were launched and how many
 were stopped. Jomini downloads these reports, compiled by Petro Ivaniuk, when you use
@@ -107,13 +110,117 @@ the defence turns out for it: more gun teams, more interceptors in the air. A sm
 meets whatever is on duty that night. In the model this is the surge: when a raid
 doubles, each drone is shot at about 14% more often.
 
-To reproduce the fit and the animation:
+**Reproduce it**
 
 ```bash
 uv sync --all-extras
 uv run python scripts/fit_ukraine_defense.py
 uv run python scripts/make_raid_gif.py
 ```
+
+</details>
+
+## A missile and drone strike
+
+![A hundred ballistic missiles alone: 6 get through. The same missiles behind 150 drones: 33 get through](docs/strike.gif)
+
+A hundred ballistic missiles fly at a city. In the top run they come alone. In the bottom
+run, 150 drones are sent first, timed to reach the city just before the missiles, as in
+the mass strikes of the Iran–Israel wars. Three rings defend the city: fighters that hunt
+drones far out, an upper tier that shoots only at missiles, and a lower tier near the city
+that shoots at both.
+
+The model is the drone raid model, extended so that drones and missiles share the
+defence. A ring splits its fire between the attackers inside it in proportion to their
+numbers, a rule from C. S. Holling's work on predators and prey (1959).
+
+Alone, 6 missiles in 100 get through. Behind the drones, 33 do: the drones use up the
+lower tier's interceptors before the missiles arrive.
+
+<details>
+<summary>The equations and the numbers</summary>
+
+Each wave $j$ (drones, missiles) has its own density $u_j(x, t)$ and speed $v_j$, and
+follows the same equation as the drone raid. Ring $k$ fires at all the waves it can
+engage and splits its shots between them:
+
+```math
+s_{kj} = \frac{F_k\,e_k\,N_{kj}}{F_k + e_k \sum_i N_{ki}}, \qquad
+h_{kj} = \frac{p_{kj}\,s_{kj}}{N_{kj}}, \qquad
+\frac{dM_k}{dt} = -\sum_j s_{kj}
+```
+
+$N_{kj}$ is the number of wave $j$ inside ring $k$, and $p_{kj}$ is the ring's chance of
+killing one of them with one shot (0 if it can't engage them). Every shot, at a drone or
+a missile, comes out of the same stock $M_k$.
+
+| Ring | Range | Engages | Chance one shot kills | Interceptors |
+|---|---|---|---|---|
+| Fighters | 300–120 km | drones | 0.6 | unlimited |
+| Upper tier | 120–40 km | missiles | 0.8 | 70 |
+| Lower tier | 40–0 km | both | 0.7 | 90 |
+
+The drones fly at 185 km/h and arrive over an hour. The missiles fly at 7,000 km/h and
+arrive within six minutes, two hours after the first drones.
+
+These numbers are made up to show the mechanism. There is too little public data on
+single strikes to fit them.
+
+**Reproduce it**
+
+```bash
+uv sync --all-extras
+uv run python scripts/make_strike_gif.py
+```
+
+</details>
+
+## Waterloo, with a bigger French army
+
+![Waterloo as fought: the French break around 7 pm and Napoleon wins 27 refights in 100. With half as many men again he wins 37](docs/waterloo.gif)
+
+Waterloo, 18 June 1815. Napoleon attacked with 68,000 men. Against him stood 138,000
+British, Dutch and Prussian troops, counted together. The top run replays the battle as
+fought. The bottom run gives Napoleon half as many men again: 102,000.
+
+Losses follow Frederick Lanchester's equations of attrition (1916), fitted to the real
+casualties. Each army breaks when its losses reach a level learned from 660 battles
+fought between 1600 and 1982, following Robert Helmbold's work on breaking points
+(1971).
+
+As fought, the French break at about seven in the evening, close to when the Imperial
+Guard's attack failed on the day. Napoleon wins 27 refights in 100. With half as many men
+again he wins 37. More men help, but he still loses most of the time.
+
+<details>
+<summary>The equations and the numbers</summary>
+
+$R$ and $B$ are the French and allied armies. Each side's losses grow with both armies'
+sizes:
+
+```math
+\frac{dR}{dt} = -\beta\,R\,B, \qquad \frac{dB}{dt} = -\rho\,R\,B
+```
+
+Fitted to the real casualties (25,000 French, 22,500 allied in half a day), a French
+soldier was 0.9 times as deadly as an allied one ($\rho / \beta$).
+
+An army breaks once it has lost a share $b$ of its men, where $\log b$ is normally
+distributed. Fitted to 660 battles, the median for 1815 is 25% for an attacker and 27%
+for a defender. Each refight draws new breaking points for both sides.
+
+This uses the linear form of Lanchester's equations, which fits the 660 battles best.
+Under the square form, where numbers count for more, the bigger French army would win
+53 refights in 100.
+
+**Reproduce it**
+
+```bash
+uv sync --all-extras
+uv run python scripts/make_waterloo_gif.py
+```
+
+</details>
 
 ## What it lacks
 
@@ -163,6 +270,7 @@ claude mcp add jomini -- uvx --from "jomini[mcp] @ git+https://github.com/umitka
 | Tool | What it does |
 |---|---|
 | `air_defense_raid` | Run drone raids against the Ukraine-fitted defence or one you design, for one night or many |
+| `air_defense_strike` | Run mixed strikes of drones and missiles against rings that share their interceptors |
 | `conflict_events` | Monthly events and deaths for any conflict or country since 1989 |
 | `escalation_model` | How strongly violence in a conflict feeds on itself |
 | `effectiveness_trend` | How each side's effectiveness changed over time |
