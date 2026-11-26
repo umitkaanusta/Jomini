@@ -18,41 +18,17 @@ are fought today and how they were fought in the past.
 
 ![Two raids flying through three rings of air defence: 24% of a 30-drone raid gets through, 9% of a 500-drone raid](docs/raid.gif)
 
-Two night-time drone raids on a city defended by three rings: interceptor drones, mobile
-gun teams and surface-to-air missiles. The model comes from Randow et al. (2026). We
-fitted it to the Ukrainian Air Force's nightly reports from September 2024 to November
-2026. A quarter of the 30-drone raid gets through. Of the 500-drone raid, less than a tenth
-does.
+Two drone raids, one of 30 drones and one of 500, fly at a city by night. Three rings of
+defence stand in their way: interceptor drones far out, mobile gun teams closer in, and
+surface-to-air missiles around the city.
 
-### How it's done
+The simulation uses a model of drone swarms against layered air defence by Charles
+Randow, Ryan Allaire and Antonio Mastroberardino (2026). It treats the swarm as a cloud
+of drones that flows toward the target and thins out as each ring fires into it.
 
-```python
-from jomini.airdefense import ukraine_defense
-
-defense = ukraine_defense()  # the defence fitted to Ukraine's reports
-print(defense.raid(30))
-# 30 launched, 7.2 leaked (24.0%); interceptors 17 kills/27 shots,
-# mobile guns 3 kills/11 shots, missiles 3 kills/3 shots
-print(defense.raid(500))
-# 500 launched, 43.8 leaked (8.8%); interceptors 376 kills/596 shots,
-# mobile guns 50 kills/157 shots, missiles 30 kills/34 shots
-```
-
-Or bring your own equipment:
-
-```python
-from jomini.airdefense import AirDefense, Layer
-
-drones = Layer("interceptor drones", 300, 150, pk=0.6, fire_rate=60, engage_rate=2, magazine=300)
-guns = Layer("mobile guns", 150, 40, pk=0.3, fire_rate=100, engage_rate=2)
-patriot = Layer("Patriot", 40, 0, pk=0.85, fire_rate=20, engage_rate=2, magazine=60)
-defense = AirDefense((drones, guns, patriot))
-
-defense.raid(300).leak_fraction  # 0.69: this defence is swamped
-
-nights = defense.campaign([300] * 10, restock={"Patriot": 4, "interceptor drones": 30})
-nights.empty_after("Patriot")  # 3: the Patriots run out of missiles after night four
-```
+We fitted the model to 778 nights of Ukrainian Air Force reports, from September 2024 to
+November 2026. The fitted defence stops three drones in four from the small raid, and
+more than nine in ten from the big one.
 
 ### The equations
 
@@ -185,7 +161,6 @@ claude mcp add jomini -- uvx --from "jomini[mcp] @ git+https://github.com/umitka
 | Tool | What it does |
 |---|---|
 | `air_defense_raid` | Run drone raids against the Ukraine-fitted defence or one you design, for one night or many |
-| `air_defense_saturation_test` | Check Ukraine's nightly reports: do bigger raids leak a bigger share? |
 | `conflict_events` | Monthly events and deaths for any conflict or country since 1989 |
 | `escalation_model` | How strongly violence in a conflict feeds on itself |
 | `effectiveness_trend` | How each side's effectiveness changed over time |
