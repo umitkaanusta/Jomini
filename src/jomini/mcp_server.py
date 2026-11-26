@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 try:
     from mcp.server.mcpserver import MCPServer
@@ -1133,11 +1134,25 @@ def escalation_model(
     }
 
 
+class AirDefenseLayer(BaseModel):
+    """One ring of a custom air defence."""
+
+    name: str = Field(description="e.g. 'interceptor drones', 'Patriot'")
+    outer_km: float = Field(description="Outer edge, km from the target")
+    inner_km: float = Field(description="Inner edge, km from the target (0 = at the target)")
+    pk: float = Field(description="Chance that one shot kills, 0-1")
+    fire_rate: float | None = Field(None, description="Most shots per hour; omit for unlimited")
+    engage_rate: float = Field(2.0, description="Shots per hour at a lone drone")
+    magazine: float | None = Field(None, description="Shots in stock; omit for unlimited")
+    cost_per_shot: float = Field(0.0, description="Dollars per shot")
+
+
 @server.tool(annotations=_READ_ONLY)
 @_provenance("air_defense")
 def air_defense_raid(
     raid_sizes: list[float],
     defense: Literal["ukraine", "generic"] = "ukraine",
+    layers: list[AirDefenseLayer] | None = None,
     surge: float | None = None,
     magazine_scale: float = 1.0,
     launch_window_hours: float = 1.0,
@@ -1152,7 +1167,9 @@ def air_defense_raid(
     ``defense="ukraine"`` (default) uses the version fitted to Ukraine's nightly Shahed
     reports since Sep 2024: unlimited capacity, surge 0.19, about 15% of a typical
     125-drone raid gets through. ``defense="generic"`` uses round placeholder numbers
-    with fixed capacity and finite magazines (shows saturation and depletion).
+    with fixed capacity and finite magazines (shows saturation and depletion). Pass
+    ``layers`` to build your own defence instead (any number of rings, any equipment);
+    ``defense`` is then ignored.
 
     Returns leak fraction, kills per layer and cost exchange for each raid size, and
     the elasticity of leakers with respect to raid size (above 1 = saturation). With
@@ -1162,7 +1179,7 @@ def air_defense_raid(
     show magazine depletion. Layer ranges and costs are placeholders, not any real
     order of battle; the Ukraine fit only pins down overall lethality and surge.
     """
-    from jomini.airdefense import generic_defense, ukraine_defense
+    from jomini.airdefense import AirDefense, Layer, generic_defense, ukraine_defense
 
     if not raid_sizes or any(s <= 0 or s > 5000 for s in raid_sizes):
         raise ToolError("raid_sizes must be 1 to 5000 attackers each")
@@ -1170,11 +1187,31 @@ def air_defense_raid(
         raise ToolError("surge must be in [0, 3] and magazine_scale in [0.05, 20]")
     if not 1 <= nights <= 60:
         raise ToolError("nights must be 1 to 60")
-    model = (
-        ukraine_defense()
-        if defense == "ukraine"
-        else generic_defense(magazine_scale=magazine_scale)
-    )
+    if layers:
+        if len(layers) > 10:
+            raise ToolError("at most 10 layers")
+        try:
+            model = AirDefense(
+                tuple(
+                    Layer(
+                        lay.name,
+                        lay.outer_km,
+                        lay.inner_km,
+                        pk=lay.pk,
+                        fire_rate=math.inf if lay.fire_rate is None else lay.fire_rate,
+                        engage_rate=lay.engage_rate,
+                        magazine=math.inf if lay.magazine is None else lay.magazine,
+                        cost_per_shot=lay.cost_per_shot,
+                    )
+                    for lay in layers
+                )
+            )
+        except ValueError as exc:
+            raise ToolError(str(exc)) from None
+    elif defense == "ukraine":
+        model = ukraine_defense()
+    else:
+        model = generic_defense(magazine_scale=magazine_scale)
     if surge is not None:
         model = model.with_surge(surge)
     sizes = sorted(set(raid_sizes))
@@ -1199,13 +1236,17 @@ def air_defense_raid(
                 "cost_exchange": _round(r.cost_exchange, 3),
             }
         )
-    out: dict[str, Any] = {"defense": defense, "raids": raids, "surge": model.layers[0].surge}
+    out: dict[str, Any] = {
+        "defense": "custom" if layers else defense,
+        "raids": raids,
+        "surge": model.layers[0].surge,
+    }
     if len(sizes) > 1:
         _, _, el = model.leakage_curve(sizes, launch_window=launch_window_hours)
         out["leak_elasticity"] = [_round(float(e), 3) for e in el]
     if nights > 1:
-        layers = {x.name: x.magazine for x in model.layers}
-        restock = {k: 0.05 * v for k, v in layers.items() if math.isfinite(v)}
+        stocks = {x.name: x.magazine for x in model.layers}
+        restock = {k: 0.05 * v for k, v in stocks.items() if math.isfinite(v)}
         camp = model.campaign([sizes[-1]] * nights, restock=restock,
                                 launch_window=launch_window_hours)  # fmt: skip
         out["campaign"] = {
