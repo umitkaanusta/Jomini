@@ -102,16 +102,18 @@ with the typical raid that month (125 drones).
 | 2× | 11.2% | 11.9% |
 | 4× | 8.5% | 8.5% |
 
-The model is off by 1.5 percentage points on average, and too high on the smallest
-raids. Before autumn 2024 big raids did not leak a smaller share.
+**Why do small raids get through more often?** A big raid is spotted early, and more of
+the defence turns out for it: more gun teams, more interceptors in the air. A small raid
+meets whatever is on duty that night. In the model this is the surge: when a raid
+doubles, each drone is shot at about 14% more often.
 
-Two warnings. The reports say only how many drones were stopped, not which ring stopped
-them, so only overall lethality and surge are really estimated; the split between rings is
-a guess. And these are Ukraine's own figures, which count decoys that never arrive as
-stopped.
+To reproduce the fit and the animation:
 
-`scripts/fit_ukraine_defense.py` reproduces the fit. `scripts/make_raid_gif.py` draws the
-animation.
+```bash
+uv sync --all-extras
+uv run python scripts/fit_ukraine_defense.py
+uv run python scripts/make_raid_gif.py
+```
 
 ## What it lacks
 
